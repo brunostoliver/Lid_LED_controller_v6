@@ -1,0 +1,14 @@
+Run module inside vs code: python main.py  
+
+Add execution privileges to create virtual environment: Set-ExecutionPolicy -ExecutionPolicy RemoteSigned -Scope Process
+
+Create a virtual environment inside the project folder: python -m venv venv
+
+Activate the virtual environment inside the project folder: venv\Scripts\activate
+
+Install packages: pip install pyserial tkcalendar pyinstaller pillow auto-py-to-exe
+
+Initialize git repository: 
+git init
+git config --global user.name "brunostoliver"
+git config --global user.email "brunostoliver@gmail.com"
