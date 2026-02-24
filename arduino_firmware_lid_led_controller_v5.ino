@@ -273,7 +273,7 @@ void emitStatusJSON()
   Serial.print(MAX_STEPS);
   Serial.print(F(",\"state\":\""));
   Serial.print(state);
-  Serial.println(F("\"")}));
+  Serial.println(F("\""));
 }
 
 /////////////////////// Arduino Core //////////////////////////////////////////
