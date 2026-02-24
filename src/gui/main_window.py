@@ -73,28 +73,55 @@ class MainWindow(ttk.Frame):
         self.conn_indicator = tk.Label(bar, textvariable=self.conn_text_var, bg="#d9534f", fg="white", padx=6)
         self.conn_indicator.pack(side=tk.RIGHT, padx=(6, 8))
 
-        # ===== Compact Status Row (plain text) =====
-        status = ttk.Frame(self)
-        status.pack(fill=tk.X, pady=(0, 8))
+        # ===== Status Rows (larger and more readable) =====
+        # Create larger font for status display
+        try:
+            base_font = tkfont.nametofont("TkDefaultFont")
+            orig_size = base_font.cget("size") or 10
+            status_font = tkfont.Font(family=base_font.cget("family"), size=int(orig_size + 2), weight="bold")
+            label_font = tkfont.Font(family=base_font.cget("family"), size=int(orig_size + 1))
+        except Exception:
+            status_font = None
+            label_font = None
 
-        ttk.Label(status, text="Lid:").pack(side=tk.LEFT)
-        self.lid_text_var = tk.StringVar(value="CLOSED")
-        ttk.Label(status, textvariable=self.lid_text_var).pack(side=tk.LEFT, padx=(6, 18))
+        # Status Row 1: Lid and Connection
+        status1 = ttk.Frame(self)
+        status1.pack(fill=tk.X, pady=(0, 6))
 
-        ttk.Label(status, text="Connection:").pack(side=tk.LEFT)
-        ttk.Label(status, textvariable=self.conn_text_var).pack(side=tk.LEFT, padx=(6, 18))
+        ttk.Label(status1, text="Lid:", font=label_font).pack(side=tk.LEFT)
+        self.lid_text_var = tk.StringVar(value="UNKNOWN")
+        ttk.Label(status1, textvariable=self.lid_text_var, font=status_font, foreground="#0066cc").pack(side=tk.LEFT, padx=(12, 24))
 
-        ttk.Label(status, text="Torque:").pack(side=tk.LEFT)
+        ttk.Label(status1, text="Connection:", font=label_font).pack(side=tk.LEFT)
+        ttk.Label(status1, textvariable=self.conn_text_var, font=status_font).pack(side=tk.LEFT, padx=(12, 0))
+
+        # Status Row 2: Torque
+        status2 = ttk.Frame(self)
+        status2.pack(fill=tk.X, pady=(0, 6))
+
+        ttk.Label(status2, text="Torque:", font=label_font).pack(side=tk.LEFT)
         self.torque_text_var = tk.StringVar(value="DISABLED")
-        ttk.Label(status, textvariable=self.torque_text_var).pack(side=tk.LEFT, padx=(6, 0))
+        ttk.Label(status2, textvariable=self.torque_text_var, font=status_font).pack(side=tk.LEFT, padx=(12, 0))
 
-        ttk.Label(status, text="  Limits:").pack(side=tk.LEFT, padx=(12, 0))
-        ttk.Label(status, text="Open").pack(side=tk.LEFT, padx=(6, 0))
+        # Status Row 3: Limit Switches (dedicated and prominent)
+        limits_frame = ttk.LabelFrame(self, text="Limit Switches", padding=8)
+        limits_frame.pack(fill=tk.X, pady=(0, 8))
+
+        # Open Limit
+        open_row = ttk.Frame(limits_frame)
+        open_row.pack(fill=tk.X, pady=4)
+        ttk.Label(open_row, text="Open Limit:", font=label_font).pack(side=tk.LEFT)
         self.limit_open_var = tk.StringVar(value="OFF")
-        ttk.Label(status, textvariable=self.limit_open_var).pack(side=tk.LEFT, padx=(4, 10))
-        ttk.Label(status, text="Close").pack(side=tk.LEFT, padx=(0, 0))
+        self.limit_open_label = ttk.Label(open_row, textvariable=self.limit_open_var, font=status_font, foreground="#ff0000")
+        self.limit_open_label.pack(side=tk.LEFT, padx=(12, 0))
+
+        # Close Limit
+        close_row = ttk.Frame(limits_frame)
+        close_row.pack(fill=tk.X, pady=4)
+        ttk.Label(close_row, text="Close Limit:", font=label_font).pack(side=tk.LEFT)
         self.limit_close_var = tk.StringVar(value="OFF")
-        ttk.Label(status, textvariable=self.limit_close_var).pack(side=tk.LEFT, padx=(4, 0))
+        self.limit_close_label = ttk.Label(close_row, textvariable=self.limit_close_var, font=status_font, foreground="#ff0000")
+        self.limit_close_label.pack(side=tk.LEFT, padx=(12, 0))
 
         # ===== Controls =====
         ctrl = ttk.LabelFrame(self, text="Controls")
@@ -384,6 +411,9 @@ class MainWindow(ttk.Frame):
     def _refresh_limit_ui(self, open_triggered: bool, close_triggered: bool):
         self.limit_open_var.set("ON" if open_triggered else "OFF")
         self.limit_close_var.set("ON" if close_triggered else "OFF")
+        # Highlight limits when triggered (red when ON, normal when OFF)
+        self.limit_open_label.config(foreground="#ff0000" if open_triggered else "#000000")
+        self.limit_close_label.config(foreground="#ff0000" if close_triggered else "#000000")
 
     def _extract_evt_int(self, raw: str, key: str):
         token = f"{key}="
