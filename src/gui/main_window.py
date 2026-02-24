@@ -78,7 +78,8 @@ class MainWindow(ttk.Frame):
         self.lid_text_var = tk.StringVar(value="CLOSED")
         ttk.Label(status, textvariable=self.lid_text_var).pack(side=tk.LEFT, padx=(6, 18))
 
-        # (Device indicator moved to the top bar)
+        ttk.Label(status, text="Connection:").pack(side=tk.LEFT)
+        ttk.Label(status, textvariable=self.conn_text_var).pack(side=tk.LEFT, padx=(6, 18))
 
         ttk.Label(status, text="Torque:").pack(side=tk.LEFT)
         self.torque_text_var = tk.StringVar(value="DISABLED")

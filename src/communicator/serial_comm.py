@@ -19,6 +19,7 @@ Protocol (Arduino):
 from __future__ import annotations
 
 import json
+import re
 import threading
 import time
 from dataclasses import dataclass
@@ -102,16 +103,14 @@ class SerialClient:
                 self.disconnect()
                 return False
 
-            # HELLO handshake
+            # HELLO handshake (optional for backward-compatible firmware)
             if not self._exchange_expect("HELLO\n", prefix="HELLO "):
-                self._emit("error", {"reason": "HELLO failed"}, raw="")
-                self.disconnect()
-                return False
+                self._emit("line", {}, raw="HELLO handshake not supported by firmware; continuing")
 
-            # Get initial JSON status to prime the GUI
+            # Get initial status to prime the GUI (JSON preferred, text fallback)
             status = self.request_status_json()
             if status is None:
-                self._emit("error", {"reason": "STATUS_JSON? failed"}, raw="")
+                self._emit("error", {"reason": "Initial STATUS query failed"}, raw="")
                 self.disconnect()
                 return False
 
@@ -152,7 +151,10 @@ class SerialClient:
                 self._emit("error", {"reason": "send failed", "exception": repr(ex)}, raw=line)
 
     def request_status_json(self) -> Optional[Dict[str, Any]]:
-        """Send STATUS_JSON? synchronously and parse one JSON line reply."""
+        """Send STATUS_JSON? synchronously and parse one JSON line reply.
+
+        Falls back to STATUS? text format for older firmware variants.
+        """
         if not self.is_connected():
             return None
         try:
@@ -175,6 +177,31 @@ class SerialClient:
                 else:
                     # surface any non-JSON line we got while waiting
                     self._emit("line", {}, raw=s)
+
+            # Fallback for firmware that only supports STATUS? plain text
+            self.send("STATUS?")
+            deadline = time.time() + 1.5
+            while time.time() < deadline:
+                raw = self._readline_blocking()
+                if raw is None:
+                    continue
+                s = raw.strip()
+
+                if s.startswith("{") and s.endswith("}"):
+                    try:
+                        data = json.loads(s)
+                        self._emit("status", data, raw=s)
+                        return data
+                    except Exception:
+                        pass
+
+                parsed = self._parse_text_status(s)
+                if parsed is not None:
+                    self._emit("status", parsed, raw=s)
+                    return parsed
+
+                self._emit("line", {}, raw=s)
+
             return None
         except Exception as ex:
             self._emit("error", {"reason": "status_json exception", "exception": repr(ex)}, raw="")
@@ -202,20 +229,56 @@ class SerialClient:
             return None
 
     def _wait_for_ready_banner(self, timeout: float) -> bool:
-        """Wait for a 'READY ...' line and emit it."""
+        """Wait for a device-ready banner and emit it.
+
+        Supports both newer ('READY ...') and legacy ('Lid Controller Ready.')
+        banners.
+        """
         deadline = time.time() + timeout
         while time.time() < deadline:
             s = self._readline_blocking()
             if not s:
                 continue
             line = s.strip()
-            if line.startswith("READY "):
+            if line.startswith("READY ") or ("LID CONTROLLER READY" in line.upper()):
                 self._emit("ready", {"line": line}, raw=line)
                 return True
             else:
                 # Also surface banners or noise (HELLO, tips, etc.)
                 self._emit("line", {}, raw=line)
         return False
+
+    def _parse_text_status(self, line: str) -> Optional[Dict[str, Any]]:
+        """Parse text status lines like: ENABLED=YES  MOVING=NO  POS=123/10500."""
+        match = re.search(
+            r"ENABLED=(YES|NO)\s+MOVING=(YES|NO)\s+POS=(\d+)\s*/\s*(\d+)",
+            line,
+            flags=re.IGNORECASE,
+        )
+        if not match:
+            return None
+
+        enabled_yes = match.group(1).upper() == "YES"
+        moving_yes = match.group(2).upper() == "YES"
+        pos = int(match.group(3))
+        max_steps = int(match.group(4))
+
+        if moving_yes:
+            state = "PARTIAL"
+        elif pos <= 0:
+            state = "CLOSED"
+        elif pos >= max_steps:
+            state = "OPEN"
+        else:
+            state = "PARTIAL"
+
+        return {
+            "en": 1 if enabled_yes else 0,
+            "mov": 1 if moving_yes else 0,
+            "pos": pos,
+            "max": max_steps,
+            "state": state,
+        }
 
     def _exchange_expect(self, send_line: str, prefix: str, timeout: float = 1.5) -> bool:
         """Send a line and expect a response starting with `prefix`."""
