@@ -33,6 +33,8 @@ class MainWindow(ttk.Frame):
 
         # Track last move direction for OPENING/CLOSING text on the Lid line
         self._last_move_dir_open: bool | None = None
+        self._limit_open_active = False
+        self._limit_close_active = False
 
         self.cal_win: CalibrationWindow | None = None
 
@@ -216,24 +218,39 @@ class MainWindow(ttk.Frame):
             state = st.get("state", "CLOSED")
 
             self._set_lid_text(state=state, moving=mov)
-            self._refresh_open_close_buttons(state=state, moving=mov)
             self._refresh_torque_ui(en=en)
 
             # Prefer live physical limit status from firmware if available.
             if "lim_open" in st or "lim_close" in st:
                 open_on = int(st.get("lim_open", 0)) != 0
                 close_on = int(st.get("lim_close", 0)) != 0
+                self._limit_open_active = open_on
+                self._limit_close_active = close_on
                 self._refresh_limit_ui(open_triggered=open_on, close_triggered=close_on)
+                # Update lid text after limit state changes from status
+                self._set_lid_text(state=state, moving=mov)
             else:
                 # Backward-compatible fallback for older firmware.
                 if mov:
+                    self._limit_open_active = False
+                    self._limit_close_active = False
                     self._refresh_limit_ui(open_triggered=False, close_triggered=False)
                 elif state == "OPEN":
+                    self._limit_open_active = True
+                    self._limit_close_active = False
                     self._refresh_limit_ui(open_triggered=True, close_triggered=False)
                 elif state == "CLOSED":
+                    self._limit_open_active = False
+                    self._limit_close_active = True
                     self._refresh_limit_ui(open_triggered=False, close_triggered=True)
                 else:
+                    self._limit_open_active = False
+                    self._limit_close_active = False
                     self._refresh_limit_ui(open_triggered=False, close_triggered=False)
+                # Update lid text after fallback limit inference
+                self._set_lid_text(state=state, moving=mov)
+
+            self._refresh_open_close_buttons(state=state, moving=mov)
 
             # Forward to calibration window if open
             if self.cal_win:
@@ -250,11 +267,29 @@ class MainWindow(ttk.Frame):
                 open_v = self._extract_evt_int(raw, "open")
                 close_v = self._extract_evt_int(raw, "close")
                 if open_v is not None and close_v is not None:
+                    self._limit_open_active = (open_v != 0)
+                    self._limit_close_active = (close_v != 0)
                     self._refresh_limit_ui(open_triggered=(open_v != 0), close_triggered=(close_v != 0))
+                    # Update lid indicator to reflect new physical state
+                    self._set_lid_text(state="CLOSED", moving=0)  # state is overridden by limits anyway
+                    st = self.controller.status
+                    self._refresh_open_close_buttons(state=st.get("state", "CLOSED"), moving=int(st.get("mov", 0)))
             elif "EVT LIMIT_OPEN" in raw:
+                self._limit_open_active = True
+                self._limit_close_active = False
                 self._refresh_limit_ui(open_triggered=True, close_triggered=False)
+                # Update lid indicator to show OPEN (physical limit active)
+                self._set_lid_text(state="OPEN", moving=0)
+                st = self.controller.status
+                self._refresh_open_close_buttons(state=st.get("state", "CLOSED"), moving=int(st.get("mov", 0)))
             elif "EVT LIMIT_CLOSED" in raw:
+                self._limit_open_active = False
+                self._limit_close_active = True
                 self._refresh_limit_ui(open_triggered=False, close_triggered=True)
+                # Update lid indicator to show CLOSED (physical limit active)
+                self._set_lid_text(state="CLOSED", moving=0)
+                st = self.controller.status
+                self._refresh_open_close_buttons(state=st.get("state", "CLOSED"), moving=int(st.get("mov", 0)))
             self._append(f"[event] {raw}")
 
             if self.cal_win:
@@ -274,7 +309,12 @@ class MainWindow(ttk.Frame):
     # ----------------------------- Status helpers ----------------------------
 
     def _set_lid_text(self, state: str, moving: int):
-        """Plain text for lid: OPEN/CLOSED/PARTIAL or OPENING/CLOSING while moving."""
+        """
+        Plain text for lid: OPEN/CLOSED/PARTIAL or OPENING/CLOSING while moving.
+        
+        Priority: Physical limits (actual hardware state) > software state estimate.
+        If a limit is active, that is the ground truth.
+        """
         if moving:
             if self._last_move_dir_open is True:
                 self.lid_text_var.set("OPENING")
@@ -283,7 +323,16 @@ class MainWindow(ttk.Frame):
             else:
                 self.lid_text_var.set("MOVING")
         else:
-            self.lid_text_var.set(state)
+            # Use physical limits as source of truth when available
+            if self._limit_open_active and self._limit_close_active:
+                self.lid_text_var.set("PARTIAL")
+            elif self._limit_open_active:
+                self.lid_text_var.set("OPEN")
+            elif self._limit_close_active:
+                self.lid_text_var.set("CLOSED")
+            else:
+                # Fallback to software state if no limits are active
+                self.lid_text_var.set(state)
 
     def _refresh_torque_ui(self, en: int):
         """Update torque label text and gate torque buttons."""
@@ -303,6 +352,21 @@ class MainWindow(ttk.Frame):
         """
         if moving:
             self.btn_open.config(state=tk.DISABLED)
+            self.btn_close.config(state=tk.DISABLED)
+            return
+
+        if self._limit_open_active and self._limit_close_active:
+            self.btn_open.config(state=tk.DISABLED)
+            self.btn_close.config(state=tk.DISABLED)
+            return
+
+        if self._limit_open_active:
+            self.btn_open.config(state=tk.DISABLED)
+            self.btn_close.config(state=tk.NORMAL)
+            return
+
+        if self._limit_close_active:
+            self.btn_open.config(state=tk.NORMAL)
             self.btn_close.config(state=tk.DISABLED)
             return
 
