@@ -72,6 +72,10 @@ unsigned long lastCloseChangeMs = 0;
 // Track current move direction so pollButtons can detect limit switches
 bool currentDirOpen = false;
 
+// Last-published physical limit states (active-LOW switches)
+bool lastLimitOpenActive = false;
+bool lastLimitCloseActive = false;
+
 /////////////////////// Forward Declarations (fix compile order) //////////////
 void pollButtons(bool allowImmediateAction = true);
 
@@ -167,20 +171,34 @@ void pollButtons(bool allowImmediateAction)
   int limitCloseReading = digitalRead(limitClosePin);
 
   // If a physical limit switch trips while moving, stop immediately.
-  if (limitOpenReading == LOW && moving) {
+  bool limitOpenActive = (limitOpenReading == LOW);
+  bool limitCloseActive = (limitCloseReading == LOW);
+
+  // Publish live limit state changes (works while idle and while moving)
+  if (limitOpenActive != lastLimitOpenActive || limitCloseActive != lastLimitCloseActive) {
+    lastLimitOpenActive = limitOpenActive;
+    lastLimitCloseActive = limitCloseActive;
+    Serial.print(F("EVT LIMIT_STATE open="));
+    Serial.print(limitOpenActive ? 1 : 0);
+    Serial.print(F(" close="));
+    Serial.println(limitCloseActive ? 1 : 0);
+    emitStatusJSON();
+  }
+
+  if (limitOpenActive && moving) {
     stopRequested = true;
     positionSteps = MAX_STEPS;
     Serial.print(F("EVT LIMIT_OPEN pos=")); Serial.println(positionSteps);
-    emitStatusJSON(); // emit JSON so GUI updates immediately
     setEnable(false);
+    emitStatusJSON(); // emit JSON so GUI updates immediately
     return; // skip button processing this cycle
   }
-  if (limitCloseReading == LOW && moving) {
+  if (limitCloseActive && moving) {
     stopRequested = true;
     positionSteps = 0;
     Serial.print(F("EVT LIMIT_CLOSED pos=")); Serial.println(positionSteps);
-    emitStatusJSON(); // emit JSON so GUI updates immediately
     setEnable(false);
+    emitStatusJSON(); // emit JSON so GUI updates immediately
     return; // skip button processing this cycle
   }
 
@@ -199,8 +217,8 @@ void pollButtons(bool allowImmediateAction)
           stopRequested = true;
           positionSteps = MAX_STEPS;
           Serial.print(F("EVT LIMIT_OPEN pos=")); Serial.println(positionSteps);
-          printStatus();
           setEnable(false); // hardware disable for extra safety
+          emitStatusJSON();
         } else if (allowImmediateAction) {
           // Open button pressed (active LOW)
           stopRequested = false;
@@ -225,8 +243,8 @@ void pollButtons(bool allowImmediateAction)
           stopRequested = true;
           positionSteps = 0;
           Serial.print(F("EVT LIMIT_CLOSED pos=")); Serial.println(positionSteps);
-          printStatus();
           setEnable(false); // hardware disable for extra safety
+          emitStatusJSON();
         } else if (allowImmediateAction) {
           // Close button pressed (active LOW)
           stopRequested = false;
@@ -248,21 +266,27 @@ String cleaned(const String& s)
 
 void printHelp()
 {
-  Serial.println(F("Commands: OPEN | CLOSE | STOP | POS? | STATUS? | ENABLE | DISABLE"));
+  Serial.println(F("Commands: OPEN | CLOSE | STOP | POS? | STATUS? | LIMITS? | ENABLE | DISABLE"));
 }
 
 void printStatus()
 {
+  bool limitOpenActive = (digitalRead(limitOpenPin) == LOW);
+  bool limitCloseActive = (digitalRead(limitClosePin) == LOW);
   Serial.print(F("ENABLED=")); Serial.print(enabled ? F("YES") : F("NO"));
   Serial.print(F("  MOVING=")); Serial.print(moving  ? F("YES") : F("NO"));
   Serial.print(F("  POS="));    Serial.print(positionSteps);
-  Serial.print(F("/"));          Serial.println(MAX_STEPS);
+  Serial.print(F("/"));          Serial.print(MAX_STEPS);
+  Serial.print(F("  LIMIT_OPEN="));  Serial.print(limitOpenActive ? F("YES") : F("NO"));
+  Serial.print(F("  LIMIT_CLOSE=")); Serial.println(limitCloseActive ? F("YES") : F("NO"));
 }
 
 void emitStatusJSON()
 {
   // Emit JSON status so the PC app updates the GUI immediately
   const char *state = (positionSteps >= MAX_STEPS) ? "OPEN" : ((positionSteps <= 0) ? "CLOSED" : "PARTIAL");
+  bool limitOpenActive = (digitalRead(limitOpenPin) == LOW);
+  bool limitCloseActive = (digitalRead(limitClosePin) == LOW);
   Serial.print(F("{\"en\":"));
   Serial.print(enabled ? 1 : 0);
   Serial.print(F(",\"mov\":"));
@@ -271,9 +295,13 @@ void emitStatusJSON()
   Serial.print(positionSteps);
   Serial.print(F(",\"max\":"));
   Serial.print(MAX_STEPS);
+  Serial.print(F(",\"lim_open\":"));
+  Serial.print(limitOpenActive ? 1 : 0);
+  Serial.print(F(",\"lim_close\":"));
+  Serial.print(limitCloseActive ? 1 : 0);
   Serial.print(F(",\"state\":\""));
   Serial.print(state);
-  Serial.println(F("\""));
+  Serial.println(F("\"}"));
 }
 
 /////////////////////// Arduino Core //////////////////////////////////////////
@@ -299,6 +327,11 @@ void setup()
   Serial.println(F("\nLid Controller Ready."));
   Serial.println(F("Assuming position = 0 (CLOSED) at power-on."));
   printHelp();
+
+  // Seed and publish initial physical limit state
+  lastLimitOpenActive = (digitalRead(limitOpenPin) == LOW);
+  lastLimitCloseActive = (digitalRead(limitClosePin) == LOW);
+  emitStatusJSON();
 }
 
 void loop()
@@ -313,6 +346,7 @@ void loop()
     else if (cmd == F("STOP"))    { stopRequested = true;  Serial.println(F("STOP requested.")); }
     else if (cmd == F("POS?"))    { Serial.print(F("POS=")); Serial.println(positionSteps); }
     else if (cmd == F("STATUS?")) { printStatus(); }
+    else if (cmd == F("LIMITS?")) { emitStatusJSON(); }
     else if (cmd == F("ENABLE"))  { setEnable(true);  Serial.println(F("Enabled (EN=LOW).")); }
     else if (cmd == F("DISABLE")) { setEnable(false); Serial.println(F("Disabled (EN=HIGH).")); }
     else if (cmd.length() > 0)    { Serial.println(F("Unknown cmd.")); printHelp(); }

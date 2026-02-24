@@ -43,6 +43,7 @@ class MainWindow(ttk.Frame):
         self._set_lid_text(state="CLOSED", moving=0)
         self._refresh_torque_ui(en=0)
         self._refresh_open_close_buttons(state="CLOSED", moving=0)
+        self._refresh_limit_ui(open_triggered=False, close_triggered=False)
 
         self.after(self.POLL_MS, self._poll_ui_queue)
 
@@ -84,6 +85,14 @@ class MainWindow(ttk.Frame):
         ttk.Label(status, text="Torque:").pack(side=tk.LEFT)
         self.torque_text_var = tk.StringVar(value="DISABLED")
         ttk.Label(status, textvariable=self.torque_text_var).pack(side=tk.LEFT, padx=(6, 0))
+
+        ttk.Label(status, text="  Limits:").pack(side=tk.LEFT, padx=(12, 0))
+        ttk.Label(status, text="Open").pack(side=tk.LEFT, padx=(6, 0))
+        self.limit_open_var = tk.StringVar(value="OFF")
+        ttk.Label(status, textvariable=self.limit_open_var).pack(side=tk.LEFT, padx=(4, 10))
+        ttk.Label(status, text="Close").pack(side=tk.LEFT, padx=(0, 0))
+        self.limit_close_var = tk.StringVar(value="OFF")
+        ttk.Label(status, textvariable=self.limit_close_var).pack(side=tk.LEFT, padx=(4, 0))
 
         # ===== Controls =====
         ctrl = ttk.LabelFrame(self, text="Controls")
@@ -210,6 +219,22 @@ class MainWindow(ttk.Frame):
             self._refresh_open_close_buttons(state=state, moving=mov)
             self._refresh_torque_ui(en=en)
 
+            # Prefer live physical limit status from firmware if available.
+            if "lim_open" in st or "lim_close" in st:
+                open_on = int(st.get("lim_open", 0)) != 0
+                close_on = int(st.get("lim_close", 0)) != 0
+                self._refresh_limit_ui(open_triggered=open_on, close_triggered=close_on)
+            else:
+                # Backward-compatible fallback for older firmware.
+                if mov:
+                    self._refresh_limit_ui(open_triggered=False, close_triggered=False)
+                elif state == "OPEN":
+                    self._refresh_limit_ui(open_triggered=True, close_triggered=False)
+                elif state == "CLOSED":
+                    self._refresh_limit_ui(open_triggered=False, close_triggered=True)
+                else:
+                    self._refresh_limit_ui(open_triggered=False, close_triggered=False)
+
             # Forward to calibration window if open
             if self.cal_win:
                 self.cal_win.on_status(st)
@@ -221,6 +246,15 @@ class MainWindow(ttk.Frame):
                 self._last_move_dir_open = ("dir=OPEN" in raw)
             elif "EVT MOVE_DONE" in raw:
                 self._last_move_dir_open = None
+            elif "EVT LIMIT_STATE" in raw:
+                open_v = self._extract_evt_int(raw, "open")
+                close_v = self._extract_evt_int(raw, "close")
+                if open_v is not None and close_v is not None:
+                    self._refresh_limit_ui(open_triggered=(open_v != 0), close_triggered=(close_v != 0))
+            elif "EVT LIMIT_OPEN" in raw:
+                self._refresh_limit_ui(open_triggered=True, close_triggered=False)
+            elif "EVT LIMIT_CLOSED" in raw:
+                self._refresh_limit_ui(open_triggered=False, close_triggered=True)
             self._append(f"[event] {raw}")
 
             if self.cal_win:
@@ -281,6 +315,20 @@ class MainWindow(ttk.Frame):
         else:  # PARTIAL
             self.btn_open.config(state=tk.NORMAL)
             self.btn_close.config(state=tk.NORMAL)
+
+    def _refresh_limit_ui(self, open_triggered: bool, close_triggered: bool):
+        self.limit_open_var.set("ON" if open_triggered else "OFF")
+        self.limit_close_var.set("ON" if close_triggered else "OFF")
+
+    def _extract_evt_int(self, raw: str, key: str):
+        token = f"{key}="
+        for part in raw.split():
+            if part.startswith(token):
+                try:
+                    return int(part[len(token):])
+                except Exception:
+                    return None
+        return None
 
     # ------------------------------ Calibration ------------------------------
 
