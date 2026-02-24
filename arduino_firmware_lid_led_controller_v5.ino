@@ -184,23 +184,7 @@ void pollButtons(bool allowImmediateAction)
     Serial.println(limitCloseActive ? 1 : 0);
     emitStatusJSON();
   }
-
-  if (limitOpenActive && moving) {
-    stopRequested = true;
-    positionSteps = MAX_STEPS;
-    Serial.print(F("EVT LIMIT_OPEN pos=")); Serial.println(positionSteps);
-    setEnable(false);
-    emitStatusJSON(); // emit JSON so GUI updates immediately
-    return; // skip button processing this cycle
-  }
-  if (limitCloseActive && moving) {
-    stopRequested = true;
-    positionSteps = 0;
-    Serial.print(F("EVT LIMIT_CLOSED pos=")); Serial.println(positionSteps);
-    setEnable(false);
-    emitStatusJSON(); // emit JSON so GUI updates immediately
-    return; // skip button processing this cycle
-  }
+  // Limit switches no longer auto-stop motion; they only report state.
 
   // Debounce OPEN
   if (openReading != lastOpenReading) {
@@ -210,19 +194,15 @@ void pollButtons(bool allowImmediateAction)
     if (stableOpenState != openReading) {
       stableOpenState = openReading;
       if (stableOpenState == LOW) {
-        // Limit switch pressed (active LOW).
-        if (moving) {
-          // Stop motion immediately, set software position to fully OPEN,
-          // emit limit event and a status snapshot, and disable the driver for safety.
-          stopRequested = true;
-          positionSteps = MAX_STEPS;
-          Serial.print(F("EVT LIMIT_OPEN pos=")); Serial.println(positionSteps);
-          setEnable(false); // hardware disable for extra safety
-          emitStatusJSON();
-        } else if (allowImmediateAction) {
-          // Open button pressed (active LOW)
-          stopRequested = false;
-          moveTo(MAX_STEPS);
+        // Open button pressed (active LOW)
+        if (allowImmediateAction && !moving) {
+          if (limitOpenActive) {
+            Serial.println(F("EVT OPEN_BLOCKED reason=LIMIT_OPEN"));
+            emitStatusJSON();
+          } else {
+            stopRequested = false;
+            moveTo(MAX_STEPS);
+          }
         }
       }
     }
@@ -236,19 +216,15 @@ void pollButtons(bool allowImmediateAction)
     if (stableCloseState != closeReading) {
       stableCloseState = closeReading;
       if (stableCloseState == LOW) {
-        // Limit switch pressed (active LOW).
-        if (moving) {
-          // Stop motion immediately, set software position to fully CLOSED,
-          // emit limit event and a status snapshot, and disable the driver for safety.
-          stopRequested = true;
-          positionSteps = 0;
-          Serial.print(F("EVT LIMIT_CLOSED pos=")); Serial.println(positionSteps);
-          setEnable(false); // hardware disable for extra safety
-          emitStatusJSON();
-        } else if (allowImmediateAction) {
-          // Close button pressed (active LOW)
-          stopRequested = false;
-          moveTo(0);
+        // Close button pressed (active LOW)
+        if (allowImmediateAction && !moving) {
+          if (limitCloseActive) {
+            Serial.println(F("EVT CLOSE_BLOCKED reason=LIMIT_CLOSE"));
+            emitStatusJSON();
+          } else {
+            stopRequested = false;
+            moveTo(0);
+          }
         }
       }
     }
@@ -353,8 +329,26 @@ void loop()
   {
     String cmd = cleaned(Serial.readStringUntil('\n'));
 
-    if      (cmd == F("OPEN"))    { stopRequested = false; moveTo(MAX_STEPS); Serial.println(F("OPEN done.")); }
-    else if (cmd == F("CLOSE"))   { stopRequested = false; moveTo(0);         Serial.println(F("CLOSE done.")); }
+    if      (cmd == F("OPEN"))    {
+      if (digitalRead(limitOpenPin) == LOW) {
+        Serial.println(F("EVT OPEN_BLOCKED reason=LIMIT_OPEN"));
+        emitStatusJSON();
+      } else {
+        stopRequested = false;
+        moveTo(MAX_STEPS);
+        Serial.println(F("OPEN done."));
+      }
+    }
+    else if (cmd == F("CLOSE"))   {
+      if (digitalRead(limitClosePin) == LOW) {
+        Serial.println(F("EVT CLOSE_BLOCKED reason=LIMIT_CLOSE"));
+        emitStatusJSON();
+      } else {
+        stopRequested = false;
+        moveTo(0);
+        Serial.println(F("CLOSE done."));
+      }
+    }
     else if (cmd == F("STOP"))    { stopRequested = true;  Serial.println(F("STOP requested.")); }
     else if (cmd == F("POS?"))    { Serial.print(F("POS=")); Serial.println(positionSteps); }
     else if (cmd == F("STATUS?")) { printStatus(); }
