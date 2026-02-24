@@ -41,10 +41,10 @@ class MainWindow(ttk.Frame):
         self._build_widgets()
         self._refresh_ports()
 
-        # Initial status
-        self._set_lid_text(state="CLOSED", moving=0)
+        # Initial status (lid starts as UNKNOWN until firmware reports limit state)
+        self._set_lid_text(state="UNKNOWN", moving=0)
         self._refresh_torque_ui(en=0)
-        self._refresh_open_close_buttons(state="CLOSED", moving=0)
+        self._refresh_open_close_buttons(state="UNKNOWN", moving=0)
         self._refresh_limit_ui(open_triggered=False, close_triggered=False)
 
         self.after(self.POLL_MS, self._poll_ui_queue)
@@ -310,10 +310,11 @@ class MainWindow(ttk.Frame):
 
     def _set_lid_text(self, state: str, moving: int):
         """
-        Plain text for lid: OPEN/CLOSED/PARTIAL or OPENING/CLOSING while moving.
+        Plain text for lid: OPEN/CLOSED/PARTIAL/UNKNOWN or OPENING/CLOSING while moving.
         
         Priority: Physical limits (actual hardware state) > software state estimate.
         If a limit is active, that is the ground truth.
+        UNKNOWN: neither limit active (position unknown until a limit is triggered).
         """
         if moving:
             if self._last_move_dir_open is True:
@@ -331,7 +332,7 @@ class MainWindow(ttk.Frame):
             elif self._limit_close_active:
                 self.lid_text_var.set("CLOSED")
             else:
-                # Fallback to software state if no limits are active
+                # Use state from firmware (may be UNKNOWN if no limits active)
                 self.lid_text_var.set(state)
 
     def _refresh_torque_ui(self, en: int):

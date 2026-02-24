@@ -284,9 +284,21 @@ void printStatus()
 void emitStatusJSON()
 {
   // Emit JSON status so the PC app updates the GUI immediately
-  const char *state = (positionSteps >= MAX_STEPS) ? "OPEN" : ((positionSteps <= 0) ? "CLOSED" : "PARTIAL");
   bool limitOpenActive = (digitalRead(limitOpenPin) == LOW);
   bool limitCloseActive = (digitalRead(limitClosePin) == LOW);
+  
+  // State derived from physical limits (ground truth), not software position
+  const char *state;
+  if (limitOpenActive && limitCloseActive) {
+    state = "PARTIAL";
+  } else if (limitOpenActive) {
+    state = "OPEN";
+  } else if (limitCloseActive) {
+    state = "CLOSED";
+  } else {
+    state = "UNKNOWN";  // Neither limit active: unknown position
+  }
+  
   Serial.print(F("{\"en\":"));
   Serial.print(enabled ? 1 : 0);
   Serial.print(F(",\"mov\":"));

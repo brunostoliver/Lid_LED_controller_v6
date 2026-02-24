@@ -249,7 +249,9 @@ class SerialClient:
         return False
 
     def _parse_text_status(self, line: str) -> Optional[Dict[str, Any]]:
-        """Parse text status lines like: ENABLED=YES  MOVING=NO  POS=123/10500."""
+        """Parse text status lines like:
+        ENABLED=YES  MOVING=NO  POS=123/10500  LIMIT_OPEN=NO  LIMIT_CLOSE=YES.
+        """
         match = re.search(
             r"ENABLED=(YES|NO)\s+MOVING=(YES|NO)\s+POS=(\d+)\s*/\s*(\d+)",
             line,
@@ -272,11 +274,19 @@ class SerialClient:
         else:
             state = "PARTIAL"
 
+        limit_open_match = re.search(r"LIMIT_OPEN=(YES|NO)", line, flags=re.IGNORECASE)
+        limit_close_match = re.search(r"LIMIT_CLOSE=(YES|NO)", line, flags=re.IGNORECASE)
+
+        lim_open = 1 if (limit_open_match and limit_open_match.group(1).upper() == "YES") else 0
+        lim_close = 1 if (limit_close_match and limit_close_match.group(1).upper() == "YES") else 0
+
         return {
             "en": 1 if enabled_yes else 0,
             "mov": 1 if moving_yes else 0,
             "pos": pos,
             "max": max_steps,
+            "lim_open": lim_open,
+            "lim_close": lim_close,
             "state": state,
         }
 

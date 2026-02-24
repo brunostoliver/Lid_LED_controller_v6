@@ -68,8 +68,20 @@ class LidController:
         return self.client.is_connected()
 
     # ----- motion / torque -----
-    def open_lid(self):        self.client.send("OPEN")
-    def close_lid(self):       self.client.send("CLOSE")
+    def open_lid(self):
+        if int(self.status.get("lim_open", 0)) != 0:
+            self._post_ui({"type": "log", "text": "Open blocked: OPEN limit switch is active."})
+            self._post_ui({"type": "event", "name": "OPEN_BLOCKED", "raw": "EVT OPEN_BLOCKED reason=LIMIT_OPEN"})
+            return
+        self.client.send("OPEN")
+
+    def close_lid(self):
+        if int(self.status.get("lim_close", 0)) != 0:
+            self._post_ui({"type": "log", "text": "Close blocked: CLOSE limit switch is active."})
+            self._post_ui({"type": "event", "name": "CLOSE_BLOCKED", "raw": "EVT CLOSE_BLOCKED reason=LIMIT_CLOSE"})
+            return
+        self.client.send("CLOSE")
+
     def stop(self):            self.client.send("STOP")
     def enable(self):          self.client.send("ENABLE")
     def disable(self):         self.client.send("DISABLE")
