@@ -53,6 +53,8 @@ class LidController:
         if ok:
             self.connected_port = port_label
             self._post_ui({"type": "log", "text": f"Connected to {port_label}"})
+            # Request initial status to get current limit state
+            self.request_status()
         else:
             self.connected_port = None
             self._post_ui({"type": "log", "text": f"Failed to connect to {port_label}"})
