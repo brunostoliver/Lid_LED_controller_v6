@@ -67,12 +67,6 @@ class MainWindow(ttk.Frame):
         self.btn_disconnect = ttk.Button(bar, text="Disconnect", command=self._disconnect, state=tk.DISABLED, width=12)
         self.btn_disconnect.pack(side=tk.LEFT)
 
-        # Right-align the device connection indicator in the same bar for symmetry
-        ttk.Label(bar, text="Device:").pack(side=tk.RIGHT)
-        self.conn_text_var = tk.StringVar(value="Disconnected")
-        self.conn_indicator = tk.Label(bar, textvariable=self.conn_text_var, bg="#d9534f", fg="white", padx=6)
-        self.conn_indicator.pack(side=tk.RIGHT, padx=(6, 8))
-
         # ===== Status Rows (larger and more readable) =====
         # Create larger font for status display
         try:
@@ -83,6 +77,9 @@ class MainWindow(ttk.Frame):
         except Exception:
             status_font = None
             label_font = None
+
+        # Initialize connection status variable (used in status row)
+        self.conn_text_var = tk.StringVar(value="Disconnected")
 
         # Status Row 1: Lid and Connection
         status1 = ttk.Frame(self)
@@ -444,10 +441,8 @@ class MainWindow(ttk.Frame):
         try:
             if self.controller.is_connected():
                 self.conn_text_var.set("Connected")
-                self.conn_indicator.config(bg="#5cb85c")
             else:
                 self.conn_text_var.set("Disconnected")
-                self.conn_indicator.config(bg="#d9534f")
         except Exception:
             pass
 
