@@ -303,12 +303,23 @@ void setup()
   while (!Serial) { /* wait for native USB boards; Uno will skip */ }
 
   Serial.println(F("\nLid Controller Ready."));
-  Serial.println(F("Assuming position = 0 (CLOSED) at power-on."));
-  printHelp();
-
-  // Seed and publish initial physical limit state
+  
+  // Initialize position based on physical limit state (not hardcoded to 0)
   lastLimitOpenActive = (digitalRead(limitOpenPin) == LOW);
   lastLimitCloseActive = (digitalRead(limitClosePin) == LOW);
+  
+  if (lastLimitOpenActive) {
+    positionSteps = MAX_STEPS;
+    Serial.println(F("Detected OPEN limit active on startup - position set to OPEN."));
+  } else if (lastLimitCloseActive) {
+    positionSteps = 0;
+    Serial.println(F("Detected CLOSE limit active on startup - position set to CLOSED."));
+  } else {
+    positionSteps = 0;
+    Serial.println(F("No limit active on startup - position assumed CLOSED (0)."));
+  }
+  
+  printHelp();
   emitStatusJSON();
 }
 
