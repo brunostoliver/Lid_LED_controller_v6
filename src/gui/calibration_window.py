@@ -36,6 +36,7 @@ class CalibrationWindow(tk.Toplevel):
         self.max_var = tk.IntVar(value=10500)
         self.steps_var = tk.IntVar(value=100)  # default step size
         self.info_var = tk.StringVar(value="")
+        self.saved_state_var = tk.StringVar(value="Not saved")
 
         # Layout
         root = ttk.Frame(self, padding=10)
@@ -59,6 +60,8 @@ class CalibrationWindow(tk.Toplevel):
         act.pack(fill=tk.X, pady=(0, 8))
         ttk.Button(act, text="Save Calibration", command=self.controller.cal_save).pack(side=tk.LEFT, padx=6, pady=6)
         ttk.Button(act, text="Restore Defaults", command=self.controller.cal_defaults).pack(side=tk.LEFT, padx=18, pady=6)
+        ttk.Label(act, text="Status:").pack(side=tk.LEFT, padx=(18, 6))
+        ttk.Label(act, textvariable=self.saved_state_var, foreground="#006600").pack(side=tk.LEFT, padx=(0, 6))
 
         # ===== Status row =====
         r0 = ttk.Frame(root); r0.pack(fill=tk.X, pady=(0, 8))
@@ -113,11 +116,17 @@ class CalibrationWindow(tk.Toplevel):
 
     def on_event(self, raw: str):
         if "CAL_STARTED" in raw:
+            self.saved_state_var.set("Not saved")
             self.info_var.set("Teach mode started. Open → Teach Opened → Close → Teach Closed → Save, then close this window.")
         elif "CAL_SAVED" in raw:
+            self.saved_state_var.set("Calibration saved")
             self.info_var.set("Calibration saved. You can now close this window to end calibration.")
         elif "CAL_ABORTED" in raw:
+            self.saved_state_var.set("Not saved")
             self.info_var.set("Teach mode stopped without saving.")
+        elif "CAL_DEFAULTS" in raw:
+            self.saved_state_var.set("Calibration saved")
+            self.info_var.set("Defaults restored and saved.")
         elif raw.startswith("CAL ") or raw.startswith("EVT "):
             self.info_var.set(raw)
 
@@ -134,6 +143,7 @@ class CalibrationWindow(tk.Toplevel):
     def _teach_opened(self):
         # Tell firmware, then proactively enable Close button so user can proceed
         self.controller.cal_set_open()
+        self.saved_state_var.set("Not saved")
         self.btn_close.config(state=tk.NORMAL)
         self.info_var.set("Opened taught. You can now Close to fully CLOSED, Teach Closed, then Save and close this window.")
         try:
@@ -143,6 +153,7 @@ class CalibrationWindow(tk.Toplevel):
 
     def _teach_closed(self):
         self.controller.cal_set_closed()
+        self.saved_state_var.set("Not saved")
         self.info_var.set("Closed taught. Click 'Save Calibration', then close this window to end calibration.")
         try:
             self.controller.request_status()
