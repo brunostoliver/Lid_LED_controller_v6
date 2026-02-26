@@ -10,14 +10,14 @@
 
   Serial: 9600 baud
   Timing: pulseDelay = 500   (microseconds between step edges)
-  Travel: MAX_STEPS  = 10500 (total travel from fully closed (0) to fully open)
+  Travel: default 10500 steps (calibrated value can be saved in EEPROM)
   Debounce: debounceDelay = 50 ms
 
   Serial commands (case-insensitive):
-    OPEN         -> move to MAX_STEPS
+    OPEN         -> move to calibrated max
     CLOSE        -> move to 0
     STOP         -> stop motion ASAP
-    POS?         -> report current step position (0..MAX_STEPS)
+    POS?         -> report current step position (0..max)
     STATUS?      -> report enabled state, moving state, position
     ENABLE       -> EN low
     DISABLE      -> EN high
@@ -29,6 +29,8 @@
       and use the internal `INPUT_PULLUP` resistor. Wire each switch between
       the pin and GND.
 */
+
+#include <EEPROM.h>
 
 /////////////////////// User-Specified Pins & Constants ///////////////////////
 const int EN_PIN   = 9;
@@ -42,10 +44,15 @@ const int buttonClosePin = 8;   // manual close button (active-LOW)
 const int limitOpenPin  = 4;    // limit switch for fully OPEN (active-LOW)
 const int limitClosePin = 5;    // limit switch for fully CLOSED (active-LOW)
 
-const long MAX_STEPS = 10500;
+const long DEFAULT_MAX_STEPS = 10500;
 const int  pulseDelay = 500;                  // microseconds
 const unsigned long debounceDelay = 50UL;     // milliseconds
 const long STEPS_PER_CHUNK = 1;               // step granularity
+
+// EEPROM calibration storage
+const int EEPROM_MAGIC_ADDR = 0;
+const int EEPROM_MAX_ADDR = EEPROM_MAGIC_ADDR + sizeof(unsigned long);
+const unsigned long EEPROM_MAGIC = 0x4C494443UL; // "LIDC"
 
 /////////////////////// Behavior Tweaks ///////////////////////////////////////
 // If your lid moves the opposite way, flip this to true.
@@ -58,8 +65,12 @@ const unsigned long ENABLE_SETTLE_US = 1000;
 volatile bool stopRequested = false;
 bool enabled = false;
 bool moving  = false;
+bool calibrationActive = false;
 
-long positionSteps = 0; // 0 = fully closed; MAX_STEPS = fully open
+long positionSteps = 0; // 0 = fully closed; maxSteps = fully open
+long maxSteps = DEFAULT_MAX_STEPS;
+long teachOpenPos = -1;
+long teachClosedPos = -1;
 
 // Button debouncing
 int lastOpenReading  = HIGH;  // using INPUT_PULLUP -> HIGH = not pressed
@@ -78,6 +89,9 @@ bool lastLimitCloseActive = false;
 
 /////////////////////// Forward Declarations (fix compile order) //////////////
 void pollButtons(bool allowImmediateAction = true);
+void emitStatusJSON();
+void saveCalibratedMaxSteps();
+void loadCalibratedMaxSteps();
 
 /////////////////////// Helpers ///////////////////////////////////////////////
 void setEnable(bool en)
@@ -109,7 +123,7 @@ inline void singleStep()
 // Move toward a target position (blocking but responsive to STOP & buttons)
 void moveTo(long targetSteps)
 {
-  targetSteps = constrain(targetSteps, 0L, MAX_STEPS);
+  targetSteps = constrain(targetSteps, 0L, maxSteps);
   if (positionSteps == targetSteps) return;
 
   if (!enabled) setEnable(true);
@@ -136,7 +150,7 @@ void moveTo(long targetSteps)
 
     // Clamp just in case
     if (positionSteps < 0) positionSteps = 0;
-    if (positionSteps > MAX_STEPS) positionSteps = MAX_STEPS;
+    if (positionSteps > maxSteps) positionSteps = maxSteps;
 
     // Poll buttons each iteration (debounced in-line)
     pollButtons(true);
@@ -146,7 +160,7 @@ void moveTo(long targetSteps)
 
   // Announce move done and current state
   {
-    const char *state = (positionSteps >= MAX_STEPS) ? "OPEN" : ((positionSteps <= 0) ? "CLOSED" : "PARTIAL");
+    const char *state = (positionSteps >= maxSteps) ? "OPEN" : ((positionSteps <= 0) ? "CLOSED" : "PARTIAL");
     Serial.print(F("EVT MOVE_DONE state=")); Serial.print(state);
     Serial.print(F(" pos=")); Serial.println(positionSteps);
     // Provide a status snapshot
@@ -196,8 +210,13 @@ void pollButtons(bool allowImmediateAction)
       if (stableOpenState == LOW) {
         // Open button pressed (active LOW)
         if (allowImmediateAction && !moving) {
-          stopRequested = false;
-          moveTo(MAX_STEPS);
+          if (limitOpenActive) {
+            Serial.println(F("EVT OPEN_BLOCKED reason=LIMIT_OPEN"));
+            emitStatusJSON();
+          } else {
+            stopRequested = false;
+            moveTo(maxSteps);
+          }
         }
       }
     }
@@ -232,7 +251,7 @@ String cleaned(const String& s)
 
 void printHelp()
 {
-  Serial.println(F("Commands: OPEN | CLOSE | STOP | POS? | STATUS? | LIMITS? | ENABLE | DISABLE"));
+  Serial.println(F("Commands: OPEN | CLOSE | STOP | POS? | STATUS? | STATUS_JSON? | LIMITS? | ENABLE | DISABLE | CAL.START | CAL.SETOPEN | CAL.SETCLOSED | CAL.SAVE | CAL.ABORT | CAL.DEFAULTS | CAL.STATUS? | J+ N | J- N"));
 }
 
 void printStatus()
@@ -242,9 +261,10 @@ void printStatus()
   Serial.print(F("ENABLED=")); Serial.print(enabled ? F("YES") : F("NO"));
   Serial.print(F("  MOVING=")); Serial.print(moving  ? F("YES") : F("NO"));
   Serial.print(F("  POS="));    Serial.print(positionSteps);
-  Serial.print(F("/"));          Serial.print(MAX_STEPS);
+  Serial.print(F("/"));          Serial.print(maxSteps);
   Serial.print(F("  LIMIT_OPEN="));  Serial.print(limitOpenActive ? F("YES") : F("NO"));
-  Serial.print(F("  LIMIT_CLOSE=")); Serial.println(limitCloseActive ? F("YES") : F("NO"));
+  Serial.print(F("  LIMIT_CLOSE=")); Serial.print(limitCloseActive ? F("YES") : F("NO"));
+  Serial.print(F("  CAL=")); Serial.println(calibrationActive ? F("YES") : F("NO"));
 }
 
 void emitStatusJSON()
@@ -272,7 +292,9 @@ void emitStatusJSON()
   Serial.print(F(",\"pos\":"));
   Serial.print(positionSteps);
   Serial.print(F(",\"max\":"));
-  Serial.print(MAX_STEPS);
+  Serial.print(maxSteps);
+  Serial.print(F(",\"cal\":"));
+  Serial.print(calibrationActive ? 1 : 0);
   Serial.print(F(",\"lim_open\":"));
   Serial.print(limitOpenActive ? 1 : 0);
   Serial.print(F(",\"lim_close\":"));
@@ -280,6 +302,27 @@ void emitStatusJSON()
   Serial.print(F(",\"state\":\""));
   Serial.print(state);
   Serial.println(F("\"}"));
+}
+
+void saveCalibratedMaxSteps()
+{
+  EEPROM.put(EEPROM_MAGIC_ADDR, EEPROM_MAGIC);
+  EEPROM.put(EEPROM_MAX_ADDR, maxSteps);
+}
+
+void loadCalibratedMaxSteps()
+{
+  unsigned long magic = 0;
+  long savedMax = DEFAULT_MAX_STEPS;
+  EEPROM.get(EEPROM_MAGIC_ADDR, magic);
+  if (magic == EEPROM_MAGIC) {
+    EEPROM.get(EEPROM_MAX_ADDR, savedMax);
+    if (savedMax >= 100 && savedMax <= 200000) {
+      maxSteps = savedMax;
+      return;
+    }
+  }
+  maxSteps = DEFAULT_MAX_STEPS;
 }
 
 /////////////////////// Arduino Core //////////////////////////////////////////
@@ -298,6 +341,9 @@ void setup()
   // Safe default: disabled on boot
   setEnable(false);
 
+  // Load persisted calibrated travel
+  loadCalibratedMaxSteps();
+
   // Serial
   Serial.begin(9600);
   while (!Serial) { /* wait for native USB boards; Uno will skip */ }
@@ -309,7 +355,7 @@ void setup()
   lastLimitCloseActive = (digitalRead(limitClosePin) == LOW);
   
   if (lastLimitOpenActive) {
-    positionSteps = MAX_STEPS;
+    positionSteps = maxSteps;
     Serial.println(F("Detected OPEN limit active on startup - position set to OPEN."));
   } else if (lastLimitCloseActive) {
     positionSteps = 0;
@@ -337,7 +383,7 @@ void loop()
         emitStatusJSON();
       } else {
         stopRequested = false;
-        moveTo(MAX_STEPS);
+        moveTo(maxSteps);
         Serial.println(F("OPEN done."));
       }
     }
@@ -355,9 +401,88 @@ void loop()
     else if (cmd == F("STOP"))    { stopRequested = true;  Serial.println(F("STOP requested.")); }
     else if (cmd == F("POS?"))    { Serial.print(F("POS=")); Serial.println(positionSteps); }
     else if (cmd == F("STATUS?")) { printStatus(); }
+    else if (cmd == F("STATUS_JSON?")) { emitStatusJSON(); }
     else if (cmd == F("LIMITS?")) { emitStatusJSON(); }
     else if (cmd == F("ENABLE"))  { setEnable(true);  Serial.println(F("Enabled (EN=LOW).")); }
     else if (cmd == F("DISABLE")) { setEnable(false); Serial.println(F("Disabled (EN=HIGH).")); }
+    else if (cmd == F("CAL.START")) {
+      calibrationActive = true;
+      teachOpenPos = -1;
+      teachClosedPos = -1;
+      Serial.println(F("EVT CAL_STARTED"));
+      emitStatusJSON();
+    }
+    else if (cmd == F("CAL.SETOPEN")) {
+      if (!calibrationActive) {
+        Serial.println(F("EVT CAL_ERROR reason=NOT_ACTIVE"));
+      } else {
+        teachOpenPos = positionSteps;
+        Serial.print(F("EVT CAL_OPEN_SET pos=")); Serial.println(teachOpenPos);
+      }
+      emitStatusJSON();
+    }
+    else if (cmd == F("CAL.SETCLOSED")) {
+      if (!calibrationActive) {
+        Serial.println(F("EVT CAL_ERROR reason=NOT_ACTIVE"));
+      } else {
+        teachClosedPos = positionSteps;
+        Serial.print(F("EVT CAL_CLOSED_SET pos=")); Serial.println(teachClosedPos);
+      }
+      emitStatusJSON();
+    }
+    else if (cmd == F("CAL.SAVE")) {
+      if (!calibrationActive) {
+        Serial.println(F("EVT CAL_ERROR reason=NOT_ACTIVE"));
+      } else if (teachOpenPos < 0 || teachClosedPos < 0) {
+        Serial.println(F("EVT CAL_ERROR reason=MISSING_SETPOINT"));
+      } else {
+        long newMax = labs(teachOpenPos - teachClosedPos);
+        if (newMax < 100 || newMax > 200000) {
+          Serial.println(F("EVT CAL_ERROR reason=RANGE"));
+        } else {
+          maxSteps = newMax;
+          positionSteps = constrain(positionSteps - teachClosedPos, 0L, maxSteps);
+          saveCalibratedMaxSteps();
+          Serial.print(F("EVT CAL_SAVED max=")); Serial.println(maxSteps);
+        }
+      }
+      emitStatusJSON();
+    }
+    else if (cmd == F("CAL.ABORT")) {
+      calibrationActive = false;
+      teachOpenPos = -1;
+      teachClosedPos = -1;
+      Serial.println(F("EVT CAL_ABORTED"));
+      emitStatusJSON();
+    }
+    else if (cmd == F("CAL.DEFAULTS")) {
+      maxSteps = DEFAULT_MAX_STEPS;
+      positionSteps = constrain(positionSteps, 0L, maxSteps);
+      saveCalibratedMaxSteps();
+      Serial.print(F("EVT CAL_DEFAULTS max=")); Serial.println(maxSteps);
+      emitStatusJSON();
+    }
+    else if (cmd == F("CAL.STATUS?")) {
+      emitStatusJSON();
+    }
+    else if (cmd.startsWith(F("J+"))) {
+      if (!calibrationActive) {
+        Serial.println(F("EVT CAL_ERROR reason=NOT_ACTIVE"));
+      } else {
+        long steps = cmd.substring(2).toInt();
+        if (steps <= 0) steps = 1;
+        moveTo(constrain(positionSteps + steps, 0L, maxSteps));
+      }
+    }
+    else if (cmd.startsWith(F("J-"))) {
+      if (!calibrationActive) {
+        Serial.println(F("EVT CAL_ERROR reason=NOT_ACTIVE"));
+      } else {
+        long steps = cmd.substring(2).toInt();
+        if (steps <= 0) steps = 1;
+        moveTo(constrain(positionSteps - steps, 0L, maxSteps));
+      }
+    }
     else if (cmd.length() > 0)    { Serial.println(F("Unknown cmd.")); printHelp(); }
   }
 
