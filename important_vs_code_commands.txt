@@ -12,3 +12,5 @@ Initialize git repository:
 git init
 git config --global user.name "brunostoliver"
 git config --global user.email "brunostoliver@gmail.com"
+
+Create windows app: auto-py-to-exe
