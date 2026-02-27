@@ -11,6 +11,8 @@ Minimal Tkinter GUI:
 
 from __future__ import annotations
 
+import json
+from pathlib import Path
 import tkinter as tk
 from tkinter import ttk, messagebox
 import tkinter.font as tkfont
@@ -22,6 +24,7 @@ from src.gui.calibration_window import CalibrationWindow
 
 class MainWindow(ttk.Frame):
     POLL_MS = 100  # UI queue poll interval (ms)
+    PREFS_PATH = Path(__file__).resolve().parents[2] / "output" / "gui_prefs.json"
 
     def __init__(self, master: tk.Tk, controller: LidController):
         super().__init__(master, padding=10)
@@ -176,12 +179,44 @@ class MainWindow(ttk.Frame):
 
     # --------------------------- Connection actions --------------------------
 
+    def _load_last_port(self) -> str:
+        try:
+            if not self.PREFS_PATH.exists():
+                return ""
+            data = json.loads(self.PREFS_PATH.read_text(encoding="utf-8"))
+            return str(data.get("last_port", "") or "")
+        except Exception:
+            return ""
+
+    def _save_last_port(self, port_label: str) -> None:
+        try:
+            self.PREFS_PATH.parent.mkdir(parents=True, exist_ok=True)
+            # Persist the bare device (e.g., COM5), not the full label text.
+            device = (port_label or "").split(" ")[0]
+            self.PREFS_PATH.write_text(json.dumps({"last_port": device}, indent=2), encoding="utf-8")
+        except Exception:
+            pass
+
     def _refresh_ports(self):
         ports = self.controller.get_ports()
         try:
             self.ports_cb["values"] = ports
-            if ports and not self.port_var.get():
-                self.port_var.set(ports[0])
+            if not ports:
+                self.port_var.set("")
+                return ports
+
+            selected = self.port_var.get()
+            if selected and selected in ports:
+                return ports
+
+            last_port = self._load_last_port()
+            if last_port:
+                for label in ports:
+                    if label.split(" ")[0] == last_port:
+                        self.port_var.set(label)
+                        return ports
+
+            self.port_var.set(ports[0])
         except Exception:
             pass
         return ports
@@ -193,6 +228,7 @@ class MainWindow(ttk.Frame):
             return
         ok = self.controller.connect(port)
         if ok:
+            self._save_last_port(port)
             self._append(f"[info] Connected to {port}")
             try:
                 self.btn_connect.config(state=tk.DISABLED)
