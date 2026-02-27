@@ -95,24 +95,31 @@ class SerialClient:
                 device, self.baud, timeout=self.read_timeout
             )
 
-            # Uno resets on open; give it time to reboot & print the READY line.
-            time.sleep(1.8)
+            # Use short reads during handshake to keep connection snappy.
+            original_timeout = self._ser.timeout
+            self._ser.timeout = min(0.2, float(self.read_timeout)) if self.read_timeout > 0 else 0.2
 
-            if not self._wait_for_ready_banner(timeout=4.0):
-                self._emit("error", {"reason": "No READY banner"}, raw="")
-                self.disconnect()
-                return False
+            # Optional READY wait: some boards reset on open, others don't.
+            # Do not fail solely because READY was not observed.
+            ready_seen = self._wait_for_ready_banner(timeout=2.0)
 
             # HELLO handshake (optional for backward-compatible firmware)
-            if not self._exchange_expect("HELLO\n", prefix="HELLO "):
+            if not self._exchange_expect("HELLO\n", prefix="HELLO ", timeout=0.8):
                 self._emit("line", {}, raw="HELLO handshake not supported by firmware; continuing")
 
             # Get initial status to prime the GUI (JSON preferred, text fallback)
-            status = self.request_status_json()
+            status = self.request_status_json(query_timeout=0.8)
+            if status is None and ready_seen:
+                # Brief retry for boards that are still finishing startup prints.
+                time.sleep(0.25)
+                status = self.request_status_json(query_timeout=0.8)
             if status is None:
                 self._emit("error", {"reason": "Initial STATUS query failed"}, raw="")
                 self.disconnect()
                 return False
+
+            # Restore user's configured read timeout for normal operation.
+            self._ser.timeout = original_timeout
 
             # Start reader + heartbeat
             self._start_reader()
@@ -150,7 +157,7 @@ class SerialClient:
             except Exception as ex:
                 self._emit("error", {"reason": "send failed", "exception": repr(ex)}, raw=line)
 
-    def request_status_json(self) -> Optional[Dict[str, Any]]:
+    def request_status_json(self, query_timeout: float = 1.5) -> Optional[Dict[str, Any]]:
         """Send STATUS_JSON? synchronously and parse one JSON line reply.
 
         Falls back to STATUS? text format for older firmware variants.
@@ -160,7 +167,7 @@ class SerialClient:
         try:
             self.send("STATUS_JSON?")
             # Temporarily read directly with a short timeout to catch the next JSON line
-            deadline = time.time() + 1.5
+            deadline = time.time() + max(0.2, query_timeout)
             while time.time() < deadline:
                 raw = self._readline_blocking()
                 if raw is None:
@@ -180,7 +187,7 @@ class SerialClient:
 
             # Fallback for firmware that only supports STATUS? plain text
             self.send("STATUS?")
-            deadline = time.time() + 1.5
+            deadline = time.time() + max(0.2, query_timeout)
             while time.time() < deadline:
                 raw = self._readline_blocking()
                 if raw is None:
