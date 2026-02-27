@@ -52,6 +52,23 @@ class MainWindow(ttk.Frame):
     # ------------------------------ UI ---------------------------------------
 
     def _build_widgets(self):
+        # Shared larger button style for better readability
+        try:
+            base_font = tkfont.nametofont("TkDefaultFont")
+            orig_size = base_font.cget("size") or 10
+            button_font = tkfont.Font(family=base_font.cget("family"), size=int(orig_size + 2), weight="bold")
+        except Exception:
+            button_font = None
+
+        style = ttk.Style()
+        try:
+            if button_font:
+                style.configure("Large.TButton", font=button_font)
+            else:
+                style.configure("Large.TButton", font=())
+        except Exception:
+            pass
+
         # Top: connection bar
         bar = ttk.Frame(self)
         bar.pack(fill=tk.X, pady=(0, 6))
@@ -61,10 +78,10 @@ class MainWindow(ttk.Frame):
         self.ports_cb = ttk.Combobox(bar, textvariable=self.port_var, state="readonly", width=30)
         self.ports_cb.pack(side=tk.LEFT, padx=(0, 8))
 
-        ttk.Button(bar, text="Refresh", command=self._refresh_ports, width=12).pack(side=tk.LEFT, padx=(0, 8))
-        self.btn_connect = ttk.Button(bar, text="Connect", command=self._connect, width=12)
+        ttk.Button(bar, text="Refresh", command=self._refresh_ports, width=12, style="Large.TButton").pack(side=tk.LEFT, padx=(0, 8))
+        self.btn_connect = ttk.Button(bar, text="Connect", command=self._connect, width=12, style="Large.TButton")
         self.btn_connect.pack(side=tk.LEFT, padx=(0, 8))
-        self.btn_disconnect = ttk.Button(bar, text="Disconnect", command=self._disconnect, state=tk.DISABLED, width=12)
+        self.btn_disconnect = ttk.Button(bar, text="Disconnect", command=self._disconnect, state=tk.DISABLED, width=12, style="Large.TButton")
         self.btn_disconnect.pack(side=tk.LEFT)
 
         # ===== Status Rows (larger and more readable) =====
@@ -129,34 +146,16 @@ class MainWindow(ttk.Frame):
         btn_grid = ttk.Frame(ctrl, padding=6)
         btn_grid.pack(fill=tk.BOTH, expand=True)
 
-        # Create a smaller font for control buttons (75% of default size) and reduced padding
-        try:
-            base_font = tkfont.nametofont("TkDefaultFont")
-            orig_size = base_font.cget("size") or 10
-            small_font = tkfont.Font(family=base_font.cget("family"), size=max(6, int(orig_size * 0.75)))
-            btn_padding = 4
-        except Exception:
-            small_font = None
-            btn_padding = 4
+        btn_padding = 6
 
-        # Define a ttk style for small buttons so we can apply the font safely
-        style = ttk.Style()
-        try:
-            if small_font:
-                style.configure("Small.TButton", font=small_font)
-            else:
-                style.configure("Small.TButton", font=())
-        except Exception:
-            pass
+        # Control buttons use the larger button style for readability
+        self.btn_open = ttk.Button(btn_grid, text="Open", command=self.controller.open_lid, padding=btn_padding, style="Large.TButton")
+        self.btn_close = ttk.Button(btn_grid, text="Close", command=self.controller.close_lid, padding=btn_padding, style="Large.TButton")
+        self.btn_stop = ttk.Button(btn_grid, text="Stop", command=self.controller.stop, padding=btn_padding, style="Large.TButton")
 
-        # Control buttons use the smaller font and reduced internal padding
-        self.btn_open = ttk.Button(btn_grid, text="Open", command=self.controller.open_lid, padding=btn_padding, style="Small.TButton")
-        self.btn_close = ttk.Button(btn_grid, text="Close", command=self.controller.close_lid, padding=btn_padding, style="Small.TButton")
-        self.btn_stop = ttk.Button(btn_grid, text="Stop", command=self.controller.stop, padding=btn_padding, style="Small.TButton")
-
-        self.btn_enable_torque = ttk.Button(btn_grid, text="Enable Holding Torque", command=self.controller.enable, padding=btn_padding, style="Small.TButton")
-        self.btn_disable_torque = ttk.Button(btn_grid, text="Disable Holding Torque", command=self.controller.disable, padding=btn_padding, style="Small.TButton")
-        self.btn_calibrate = ttk.Button(btn_grid, text="Calibration…", command=self._open_calibration, padding=btn_padding, style="Small.TButton")
+        self.btn_enable_torque = ttk.Button(btn_grid, text="Enable Holding Torque", command=self.controller.enable, padding=btn_padding, style="Large.TButton")
+        self.btn_disable_torque = ttk.Button(btn_grid, text="Disable Holding Torque", command=self.controller.disable, padding=btn_padding, style="Large.TButton")
+        self.btn_calibrate = ttk.Button(btn_grid, text="Calibration…", command=self._open_calibration, padding=btn_padding, style="Large.TButton")
 
         # Place buttons in a 3x2 grid
         self.btn_open.grid(row=0, column=0, sticky="nsew", padx=6, pady=6)

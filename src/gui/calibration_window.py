@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import tkinter as tk
 from tkinter import ttk
+import tkinter.font as tkfont
 
 
 class CalibrationWindow(tk.Toplevel):
@@ -42,6 +43,23 @@ class CalibrationWindow(tk.Toplevel):
         root = ttk.Frame(self, padding=10)
         root.pack(fill=tk.BOTH, expand=True)
 
+        # Shared larger button style for better readability
+        try:
+            base_font = tkfont.nametofont("TkDefaultFont")
+            orig_size = base_font.cget("size") or 10
+            button_font = tkfont.Font(family=base_font.cget("family"), size=int(orig_size + 2), weight="bold")
+        except Exception:
+            button_font = None
+
+        style = ttk.Style()
+        try:
+            if button_font:
+                style.configure("Large.TButton", font=button_font)
+            else:
+                style.configure("Large.TButton", font=())
+        except Exception:
+            pass
+
         # ===== Instructions (top) =====
         instructions = (
             "Calibration assumes the lid is CLOSED now.\n"
@@ -58,8 +76,8 @@ class CalibrationWindow(tk.Toplevel):
         # ===== Actions =====
         act = ttk.LabelFrame(root, text="Actions")
         act.pack(fill=tk.X, pady=(0, 8))
-        ttk.Button(act, text="Save Calibration", command=self.controller.cal_save).pack(side=tk.LEFT, padx=6, pady=6)
-        ttk.Button(act, text="Restore Defaults", command=self.controller.cal_defaults).pack(side=tk.LEFT, padx=18, pady=6)
+        ttk.Button(act, text="Save Calibration", command=self.controller.cal_save, style="Large.TButton").pack(side=tk.LEFT, padx=6, pady=6)
+        ttk.Button(act, text="Restore Defaults", command=self.controller.cal_defaults, style="Large.TButton").pack(side=tk.LEFT, padx=18, pady=6)
         ttk.Label(act, text="Status:").pack(side=tk.LEFT, padx=(18, 6))
         ttk.Label(act, textvariable=self.saved_state_var, foreground="#006600").pack(side=tk.LEFT, padx=(0, 6))
 
@@ -78,16 +96,16 @@ class CalibrationWindow(tk.Toplevel):
         ttk.Label(movef, text="Steps:").pack(side=tk.LEFT, padx=(6, 6))
         steps_entry = ttk.Entry(movef, textvariable=self.steps_var, width=8)
         steps_entry.pack(side=tk.LEFT, padx=(0, 12))
-        self.btn_open = ttk.Button(movef, text="Open", command=self._move_open)
+        self.btn_open = ttk.Button(movef, text="Open", command=self._move_open, style="Large.TButton")
         self.btn_open.pack(side=tk.LEFT, padx=6, pady=6)
-        self.btn_close = ttk.Button(movef, text="Close", command=self._move_close)
+        self.btn_close = ttk.Button(movef, text="Close", command=self._move_close, style="Large.TButton")
         self.btn_close.pack(side=tk.LEFT, padx=6, pady=6)
 
         # ===== Teach setpoints =====
         sp = ttk.LabelFrame(root, text="Teach Setpoints")
         sp.pack(fill=tk.X, pady=(0, 8))
-        ttk.Button(sp, text="Teach Opened", command=self._teach_opened).pack(side=tk.LEFT, padx=6, pady=6)
-        ttk.Button(sp, text="Teach Closed", command=self._teach_closed).pack(side=tk.LEFT, padx=6, pady=6)
+        ttk.Button(sp, text="Teach Opened", command=self._teach_opened, style="Large.TButton").pack(side=tk.LEFT, padx=6, pady=6)
+        ttk.Button(sp, text="Teach Closed", command=self._teach_closed, style="Large.TButton").pack(side=tk.LEFT, padx=6, pady=6)
 
         # Info line
         ttk.Label(root, textvariable=self.info_var, foreground="#444").pack(fill=tk.X, pady=(6, 0))
