@@ -64,7 +64,8 @@ class MainWindow(ttk.Frame):
         try:
             base_font = tkfont.nametofont("TkDefaultFont")
             orig_size = base_font.cget("size") or 10
-            button_font = tkfont.Font(family=base_font.cget("family"), size=int(orig_size + 2), weight="bold")
+            # Keep buttons compact so other panels have more room
+            button_font = tkfont.Font(family=base_font.cget("family"), size=int(orig_size), weight="normal")
         except Exception:
             button_font = None
 
@@ -86,10 +87,10 @@ class MainWindow(ttk.Frame):
         self.ports_cb = ttk.Combobox(bar, textvariable=self.port_var, state="readonly", width=30)
         self.ports_cb.pack(side=tk.LEFT, padx=(0, 8))
 
-        ttk.Button(bar, text="Refresh", command=self._refresh_ports, width=12, style="Large.TButton").pack(side=tk.LEFT, padx=(0, 8))
-        self.btn_connect = ttk.Button(bar, text="Connect", command=self._connect, width=12, style="Large.TButton")
+        ttk.Button(bar, text="Refresh", command=self._refresh_ports, width=10, style="Large.TButton").pack(side=tk.LEFT, padx=(0, 8))
+        self.btn_connect = ttk.Button(bar, text="Connect", command=self._connect, width=10, style="Large.TButton")
         self.btn_connect.pack(side=tk.LEFT, padx=(0, 8))
-        self.btn_disconnect = ttk.Button(bar, text="Disconnect", command=self._disconnect, state=tk.DISABLED, width=12, style="Large.TButton")
+        self.btn_disconnect = ttk.Button(bar, text="Disconnect", command=self._disconnect, state=tk.DISABLED, width=10, style="Large.TButton")
         self.btn_disconnect.pack(side=tk.LEFT)
 
         # ===== Status Rows (larger and more readable) =====
@@ -145,16 +146,55 @@ class MainWindow(ttk.Frame):
         self.limit_close_label = ttk.Label(close_row, textvariable=self.limit_close_var, font=status_font, foreground="#ff0000")
         self.limit_close_label.pack(side=tk.LEFT, padx=(12, 0))
 
+        # ===== Flat Panel =====
+        # Give this more vertical presence (two-row layout + expand)
+        flat = ttk.LabelFrame(self, text="Flat Panel", padding=8)
+        flat.pack(fill=tk.BOTH, expand=True, pady=(0, 8))
+
+        flat_row1 = ttk.Frame(flat)
+        flat_row1.pack(fill=tk.X)
+
+        self.flat_on_var = tk.IntVar(value=0)
+        self.chk_flat_on = ttk.Checkbutton(
+            flat_row1,
+            text="On",
+            variable=self.flat_on_var,
+            command=self._on_flat_toggle,
+        )
+        self.chk_flat_on.pack(side=tk.LEFT, padx=(0, 16))
+
+        ttk.Label(flat_row1, text="Brightness (0-255):").pack(side=tk.LEFT)
+
+        self.flat_pwm_entry_var = tk.StringVar(value="0")
+        self.flat_pwm_entry = ttk.Entry(flat_row1, textvariable=self.flat_pwm_entry_var, width=6)
+        self.flat_pwm_entry.pack(side=tk.LEFT, padx=(12, 0))
+        self.flat_pwm_entry.bind("<Return>", self._on_flat_entry_commit)
+        self.flat_pwm_entry.bind("<FocusOut>", self._on_flat_entry_commit)
+
+        flat_row2 = ttk.Frame(flat)
+        flat_row2.pack(fill=tk.X, pady=(10, 0))
+
+        self.flat_pwm_var = tk.IntVar(value=0)
+        self.flat_pwm_scale = ttk.Scale(
+            flat_row2,
+            from_=0,
+            to=255,
+            orient=tk.HORIZONTAL,
+            command=self._on_flat_slider,
+        )
+        self.flat_pwm_scale.pack(side=tk.LEFT, fill=tk.X, expand=True)
+        self.flat_pwm_scale.set(0)
+
         # ===== Controls =====
         ctrl = ttk.LabelFrame(self, text="Controls")
-        # Expand controls to take the available space so buttons can form a square grid
-        ctrl.pack(fill=tk.BOTH, expand=True, pady=(0, 8))
+        # Keep controls compact; let Flat Panel take more of the window.
+        ctrl.pack(fill=tk.X, expand=False, pady=(0, 8))
 
         # Inner grid for buttons (3 columns x 2 rows) — buttons will expand equally
         btn_grid = ttk.Frame(ctrl, padding=6)
         btn_grid.pack(fill=tk.BOTH, expand=True)
 
-        btn_padding = 6
+        btn_padding = 3
 
         # Control buttons use the larger button style for readability
         self.btn_open = ttk.Button(btn_grid, text="Open", command=self.controller.open_lid, padding=btn_padding, style="Large.TButton")
@@ -181,38 +221,6 @@ class MainWindow(ttk.Frame):
             btn_grid.grid_rowconfigure(r, weight=1)
 
         # Device log removed — logs go to stdout
-
-        # ===== Flat Panel =====
-        flat = ttk.LabelFrame(self, text="Flat Panel", padding=8)
-        flat.pack(fill=tk.X, pady=(0, 8))
-
-        self.flat_on_var = tk.IntVar(value=0)
-        self.chk_flat_on = ttk.Checkbutton(
-            flat,
-            text="On",
-            variable=self.flat_on_var,
-            command=self._on_flat_toggle,
-        )
-        self.chk_flat_on.pack(side=tk.LEFT, padx=(0, 12))
-
-        ttk.Label(flat, text="Brightness (0-255):").pack(side=tk.LEFT)
-
-        self.flat_pwm_var = tk.IntVar(value=0)
-        self.flat_pwm_scale = ttk.Scale(
-            flat,
-            from_=0,
-            to=255,
-            orient=tk.HORIZONTAL,
-            command=self._on_flat_slider,
-        )
-        self.flat_pwm_scale.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(12, 12))
-        self.flat_pwm_scale.set(0)
-
-        self.flat_pwm_entry_var = tk.StringVar(value="0")
-        self.flat_pwm_entry = ttk.Entry(flat, textvariable=self.flat_pwm_entry_var, width=6)
-        self.flat_pwm_entry.pack(side=tk.LEFT)
-        self.flat_pwm_entry.bind("<Return>", self._on_flat_entry_commit)
-        self.flat_pwm_entry.bind("<FocusOut>", self._on_flat_entry_commit)
 
     # --------------------------- Connection actions --------------------------
 
