@@ -49,7 +49,7 @@ const int  pulseDelayUs = 500;                 // microseconds between step edge
 const unsigned long debounceDelayMs = 50UL;    // manual buttons only
 const long STEPS_PER_CHUNK = 1;
 
-const unsigned long STATUS_PERIOD_MS = 250UL;  // periodic JSON emission while moving
+const unsigned long STATUS_PERIOD_MS = 0UL;    // 0 disables unsolicited JSON while moving
 const unsigned long ENABLE_SETTLE_US  = 1000UL;
 
 // Direction invert if lid moves the wrong way
@@ -432,10 +432,39 @@ void handleCommand(const String& cmd, bool fromMoveLoop)
 
 void serviceSerialDuringMove()
 {
-  while (Serial.available())
+  static char cmdBuf[64];
+  static uint8_t cmdLen = 0;
+
+  while (Serial.available() > 0)
   {
-    String cmd = cleaned(Serial.readStringUntil('\n'));
-    handleCommand(cmd, true);
+    char ch = (char)Serial.read();
+
+    if (ch == '\r')
+    {
+      continue;
+    }
+
+    if (ch == '\n')
+    {
+      if (cmdLen > 0)
+      {
+        cmdBuf[cmdLen] = '\0';
+        String cmd = cleaned(String(cmdBuf));
+        handleCommand(cmd, true);
+        cmdLen = 0;
+      }
+      continue;
+    }
+
+    if (cmdLen < (sizeof(cmdBuf) - 1))
+    {
+      cmdBuf[cmdLen++] = ch;
+    }
+    else
+    {
+      // Overflow guard: drop malformed/overlong command frame.
+      cmdLen = 0;
+    }
   }
 }
 
@@ -458,12 +487,16 @@ void pollButtons(bool allowImmediateAction)
     lastLimitOpenActive  = lo;
     lastLimitCloseActive = lc;
 
-    Serial.print(F("EVT LIMIT_STATE open="));
-    Serial.print(lo ? 1 : 0);
-    Serial.print(F(" close="));
-    Serial.println(lc ? 1 : 0);
+    // Avoid unsolicited serial bursts while moving (can introduce step jitter at 9600 baud).
+    if (!moving)
+    {
+      Serial.print(F("EVT LIMIT_STATE open="));
+      Serial.print(lo ? 1 : 0);
+      Serial.print(F(" close="));
+      Serial.println(lc ? 1 : 0);
 
-    emitStatusJSON();
+      emitStatusJSON();
+    }
   }
 
   // Debounce OPEN button
@@ -571,12 +604,15 @@ void moveTo(long targetSteps)
     }
 #endif
 
-    // Periodic JSON heartbeat while moving
-    unsigned long nowMs = millis();
-    if (nowMs - lastStatusMs >= STATUS_PERIOD_MS)
+    // Optional periodic JSON heartbeat while moving (disabled when STATUS_PERIOD_MS == 0)
+    if (STATUS_PERIOD_MS > 0UL)
     {
-      emitStatusJSON();
-      lastStatusMs = nowMs;
+      unsigned long nowMs = millis();
+      if (nowMs - lastStatusMs >= STATUS_PERIOD_MS)
+      {
+        emitStatusJSON();
+        lastStatusMs = nowMs;
+      }
     }
   }
 
