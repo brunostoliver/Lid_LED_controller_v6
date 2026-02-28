@@ -39,6 +39,8 @@ class LidController:
             "max": 10500,
             "state": "CLOSED",
             "cal": 0,
+            "flat_on": 0,
+            "flat_pwm": 0,
         }
 
         self.connected_port: Optional[str] = None
@@ -88,6 +90,21 @@ class LidController:
     def enable(self):          self.client.send("ENABLE")
     def disable(self):         self.client.send("DISABLE")
     def request_status(self):  self.client.request_status_json()
+
+    # ----- flat panel -----
+    def flat_on(self) -> None:
+        self.client.send("FLAT.ON")
+
+    def flat_off(self) -> None:
+        self.client.send("FLAT.OFF")
+
+    def flat_brightness(self, pwm: int) -> None:
+        try:
+            v = int(pwm)
+        except Exception:
+            v = 0
+        v = max(0, min(255, v))
+        self.client.send(f"FLAT.BRIGHT {v}")
 
     # ----- calibration (teach mode) -----
     def cal_start(self):       self.client.send("CAL.START")
