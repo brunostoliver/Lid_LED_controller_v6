@@ -39,6 +39,10 @@ class MainWindow(ttk.Frame):
         self._limit_open_active = False
         self._limit_close_active = False
 
+        # Flat panel UI state
+        self._flat_ui_updating = False
+        self._flat_send_after_id: str | None = None
+
         self.cal_win: CalibrationWindow | None = None
 
         self._build_widgets()
@@ -49,6 +53,7 @@ class MainWindow(ttk.Frame):
         self._refresh_torque_ui(en=0)
         self._refresh_open_close_buttons(state="UNKNOWN", moving=0)
         self._refresh_limit_ui(open_triggered=False, close_triggered=False)
+        self._refresh_flat_connected_state()
 
         self.after(self.POLL_MS, self._poll_ui_queue)
 
@@ -177,6 +182,38 @@ class MainWindow(ttk.Frame):
 
         # Device log removed — logs go to stdout
 
+        # ===== Flat Panel =====
+        flat = ttk.LabelFrame(self, text="Flat Panel", padding=8)
+        flat.pack(fill=tk.X, pady=(0, 8))
+
+        self.flat_on_var = tk.IntVar(value=0)
+        self.chk_flat_on = ttk.Checkbutton(
+            flat,
+            text="On",
+            variable=self.flat_on_var,
+            command=self._on_flat_toggle,
+        )
+        self.chk_flat_on.pack(side=tk.LEFT, padx=(0, 12))
+
+        ttk.Label(flat, text="Brightness (0-255):").pack(side=tk.LEFT)
+
+        self.flat_pwm_var = tk.IntVar(value=0)
+        self.flat_pwm_scale = ttk.Scale(
+            flat,
+            from_=0,
+            to=255,
+            orient=tk.HORIZONTAL,
+            command=self._on_flat_slider,
+        )
+        self.flat_pwm_scale.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(12, 12))
+        self.flat_pwm_scale.set(0)
+
+        self.flat_pwm_entry_var = tk.StringVar(value="0")
+        self.flat_pwm_entry = ttk.Entry(flat, textvariable=self.flat_pwm_entry_var, width=6)
+        self.flat_pwm_entry.pack(side=tk.LEFT)
+        self.flat_pwm_entry.bind("<Return>", self._on_flat_entry_commit)
+        self.flat_pwm_entry.bind("<FocusOut>", self._on_flat_entry_commit)
+
     # --------------------------- Connection actions --------------------------
 
     def _load_last_port(self) -> str:
@@ -237,6 +274,7 @@ class MainWindow(ttk.Frame):
             except Exception:
                 pass
             self._refresh_connection_indicator()
+            self._refresh_flat_connected_state()
         else:
             self._append(f"[error] Failed to connect to {port}")
 
@@ -250,6 +288,7 @@ class MainWindow(ttk.Frame):
             pass
         self._append("[info] Disconnected")
         self._refresh_connection_indicator()
+        self._refresh_flat_connected_state()
 
     # --------------------------- UI Queue pump -------------------------------
 
@@ -311,6 +350,10 @@ class MainWindow(ttk.Frame):
 
             self._refresh_open_close_buttons(state=state, moving=mov)
 
+            # Flat panel state (optional fields)
+            if "flat_on" in st or "flat_pwm" in st:
+                self._sync_flat_ui_from_status(st)
+
             # Forward to calibration window if open
             if self.cal_win:
                 self.cal_win.on_status(st)
@@ -364,6 +407,92 @@ class MainWindow(ttk.Frame):
             self._append(f"[error] {msg.get('data')}")
         elif mtype == "log":
             self._append(msg.get("text", ""))
+
+        # Update flat control connected gating after any message
+        try:
+            self._refresh_flat_connected_state()
+        except Exception:
+            pass
+
+    # ------------------------------ Flat panel ------------------------------
+
+    def _refresh_flat_connected_state(self) -> None:
+        connected = bool(self.controller.is_connected())
+        state = tk.NORMAL if connected else tk.DISABLED
+        try:
+            self.chk_flat_on.config(state=state)
+            self.flat_pwm_scale.config(state=state)
+            self.flat_pwm_entry.config(state=state)
+        except Exception:
+            pass
+
+    def _sync_flat_ui_from_status(self, st: dict) -> None:
+        self._flat_ui_updating = True
+        try:
+            flat_on = int(st.get("flat_on", 0))
+            flat_pwm = int(st.get("flat_pwm", 0))
+            flat_pwm = max(0, min(255, flat_pwm))
+
+            self.flat_on_var.set(1 if flat_on else 0)
+            self.flat_pwm_var.set(flat_pwm)
+            self.flat_pwm_scale.set(flat_pwm)
+            self.flat_pwm_entry_var.set(str(flat_pwm))
+        finally:
+            self._flat_ui_updating = False
+
+    def _on_flat_toggle(self) -> None:
+        if self._flat_ui_updating:
+            return
+        on = int(self.flat_on_var.get()) != 0
+        if on:
+            # Ensure brightness is applied when turning on
+            pwm = self._get_flat_pwm_from_ui()
+            self.controller.flat_brightness(pwm)
+            self.controller.flat_on()
+        else:
+            self.controller.flat_off()
+
+    def _on_flat_slider(self, _val: str) -> None:
+        if self._flat_ui_updating:
+            return
+        pwm = int(float(self.flat_pwm_scale.get()))
+        pwm = max(0, min(255, pwm))
+        self.flat_pwm_var.set(pwm)
+        self.flat_pwm_entry_var.set(str(pwm))
+        self._schedule_send_flat_brightness(pwm)
+
+    def _on_flat_entry_commit(self, _evt=None) -> None:
+        if self._flat_ui_updating:
+            return
+        pwm = self._get_flat_pwm_from_ui()
+        self.flat_pwm_scale.set(pwm)
+        self.flat_pwm_var.set(pwm)
+        self.flat_pwm_entry_var.set(str(pwm))
+        self._schedule_send_flat_brightness(pwm)
+
+    def _get_flat_pwm_from_ui(self) -> int:
+        try:
+            pwm = int(str(self.flat_pwm_entry_var.get()).strip())
+        except Exception:
+            pwm = 0
+        pwm = max(0, min(255, pwm))
+        return pwm
+
+    def _schedule_send_flat_brightness(self, pwm: int) -> None:
+        # Throttle rapid slider movements to avoid spamming serial.
+        try:
+            if self._flat_send_after_id:
+                self.after_cancel(self._flat_send_after_id)
+        except Exception:
+            pass
+        self._flat_send_after_id = self.after(150, lambda: self._send_flat_brightness(pwm))
+
+    def _send_flat_brightness(self, pwm: int) -> None:
+        self._flat_send_after_id = None
+        self.controller.flat_brightness(pwm)
+        # If currently ON, keep output enabled while changing brightness.
+        if int(self.flat_on_var.get()) != 0:
+            self.controller.flat_on()
 
     # ----------------------------- Status helpers ----------------------------
 
