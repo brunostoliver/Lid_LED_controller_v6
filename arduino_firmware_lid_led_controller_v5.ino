@@ -48,6 +48,7 @@ const long DEFAULT_MAX_STEPS = 10500;
 const int  pulseDelay = 500;                  // microseconds
 const unsigned long debounceDelay = 50UL;     // milliseconds
 const long STEPS_PER_CHUNK = 1;               // step granularity
+const long LIMIT_POS_TOL = 20;                // steps tolerance when validating end-stop state
 
 // EEPROM calibration storage
 const int EEPROM_MAGIC_ADDR = 0;
@@ -213,7 +214,7 @@ void pollButtons(bool allowImmediateAction)
       if (stableOpenState == LOW) {
         // Open button pressed (active LOW)
         if (allowImmediateAction && !moving) {
-          if (limitOpenActive) {
+          if (limitOpenActive && positionSteps >= (maxSteps - LIMIT_POS_TOL)) {
             Serial.println(F("EVT OPEN_BLOCKED reason=LIMIT_OPEN"));
             emitStatusJSON();
           } else {
@@ -235,8 +236,13 @@ void pollButtons(bool allowImmediateAction)
       if (stableCloseState == LOW) {
         // Close button pressed (active LOW)
         if (allowImmediateAction && !moving) {
-          stopRequested = false;
-          moveTo(0);
+          if (limitCloseActive && positionSteps <= LIMIT_POS_TOL) {
+            Serial.println(F("EVT CLOSE_BLOCKED reason=LIMIT_CLOSE"));
+            emitStatusJSON();
+          } else {
+            stopRequested = false;
+            moveTo(0);
+          }
         }
       }
     }
@@ -383,7 +389,7 @@ void loop()
 
     if      (cmd == F("OPEN"))    {
       // Check if open limit is active; if so, block the command
-      if (digitalRead(limitOpenPin) == LOW) {
+      if ((digitalRead(limitOpenPin) == LOW) && (positionSteps >= (maxSteps - LIMIT_POS_TOL))) {
         Serial.println(F("EVT OPEN_BLOCKED reason=LIMIT_OPEN"));
         emitStatusJSON();
       } else {
@@ -394,7 +400,7 @@ void loop()
     }
     else if (cmd == F("CLOSE"))   {
       // Check if close limit is active; if so, block the command
-      if (digitalRead(limitClosePin) == LOW) {
+      if ((digitalRead(limitClosePin) == LOW) && (positionSteps <= LIMIT_POS_TOL)) {
         Serial.println(F("EVT CLOSE_BLOCKED reason=LIMIT_CLOSE"));
         emitStatusJSON();
       } else {
