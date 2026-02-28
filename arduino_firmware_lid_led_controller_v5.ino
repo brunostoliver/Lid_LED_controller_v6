@@ -92,6 +92,7 @@ void pollButtons(bool allowImmediateAction = true);
 void emitStatusJSON();
 void saveCalibratedMaxSteps();
 void loadCalibratedMaxSteps();
+void serviceSerialDuringMove(); // Add forward declaration
 
 /////////////////////// Helpers ///////////////////////////////////////////////
 void setEnable(bool en)
@@ -145,6 +146,8 @@ void moveTo(long targetSteps)
   while (!stopRequested && positionSteps != targetSteps)
   {
     // One step
+    serviceSerialDuringMove();
+
     singleStep();
     positionSteps += dirOpen ? STEPS_PER_CHUNK : -STEPS_PER_CHUNK;
 
@@ -275,14 +278,16 @@ void emitStatusJSON()
   
   // State derived from physical limits (ground truth), not software position
   const char *state;
-  if (limitOpenActive && limitCloseActive) {
+  if (moving) {
+    state = "MOVING";
+  } else if (limitOpenActive && limitCloseActive) {
     state = "PARTIAL";
   } else if (limitOpenActive) {
     state = "OPEN";
   } else if (limitCloseActive) {
     state = "CLOSED";
   } else {
-    state = "UNKNOWN";  // Neither limit active: unknown position
+    state = "UNKNOWN";
   }
   
   Serial.print(F("{\"en\":"));
@@ -489,5 +494,70 @@ void loop()
   // Poll buttons when idle
   if (!moving) {
     pollButtons(true);
+  }
+}
+
+// Service serial commands during move (to receive STOP, etc.)
+void serviceSerialDuringMove()
+{
+  static char cmdBuf[64];
+  static uint8_t cmdLen = 0;
+
+  while (Serial.available() > 0)
+  {
+    char ch = (char)Serial.read();
+
+    if (ch == '\r') {
+      continue;
+    }
+
+    if (ch == '\n')
+    {
+      if (cmdLen == 0) {
+        continue;
+      }
+
+      cmdBuf[cmdLen] = '\0';
+      cmdLen = 0;
+
+      String cmd = cleaned(String(cmdBuf));
+
+      if (cmd == F("STOP"))
+      {
+        stopRequested = true;
+        Serial.println(F("STOP requested."));
+      }
+      else if (cmd == F("ENABLE"))
+      {
+        setEnable(true);
+        Serial.println(F("Enabled (EN=LOW)."));
+      }
+      else if (cmd == F("DISABLE"))
+      {
+        setEnable(false);
+        Serial.println(F("Disabled (EN=HIGH)."));
+      }
+      else if (cmd == F("STATUS_JSON?") || cmd == F("LIMITS?"))
+      {
+        emitStatusJSON();
+      }
+      else if (cmd == F("STATUS?"))
+      {
+        printStatus();
+      }
+      else if (cmd == F("POS?"))
+      {
+        Serial.print(F("POS="));
+        Serial.println(positionSteps);
+      }
+
+      continue;
+    }
+
+    if (cmdLen < (sizeof(cmdBuf) - 1)) {
+      cmdBuf[cmdLen++] = ch;
+    } else {
+      cmdLen = 0;
+    }
   }
 }
