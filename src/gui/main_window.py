@@ -146,10 +146,50 @@ class MainWindow(ttk.Frame):
         self.limit_close_label = ttk.Label(close_row, textvariable=self.limit_close_var, font=status_font, foreground="#ff0000")
         self.limit_close_label.pack(side=tk.LEFT, padx=(12, 0))
 
+        # ===== Main content area (Controls + Flat Panel share space) =====
+        content = ttk.Frame(self)
+        content.pack(fill=tk.BOTH, expand=True, pady=(0, 8))
+        content.grid_columnconfigure(0, weight=1)
+        content.grid_rowconfigure(0, weight=1)
+        content.grid_rowconfigure(1, weight=1)
+
+        # ===== Controls =====
+        ctrl = ttk.LabelFrame(content, text="Controls")
+        ctrl.grid(row=0, column=0, sticky="nsew", pady=(0, 8))
+
+        # Inner grid for buttons (3 columns x 2 rows)
+        btn_grid = ttk.Frame(ctrl, padding=6)
+        btn_grid.pack(fill=tk.BOTH, expand=True)
+
+        btn_padding = 3
+
+        # Control buttons use the (now compact) Large.TButton style
+        self.btn_open = ttk.Button(btn_grid, text="Open", command=self.controller.open_lid, padding=btn_padding, style="Large.TButton")
+        self.btn_close = ttk.Button(btn_grid, text="Close", command=self.controller.close_lid, padding=btn_padding, style="Large.TButton")
+        self.btn_stop = ttk.Button(btn_grid, text="Stop", command=self.controller.stop, padding=btn_padding, style="Large.TButton")
+
+        self.btn_enable_torque = ttk.Button(btn_grid, text="Enable Holding Torque", command=self.controller.enable, padding=btn_padding, style="Large.TButton")
+        self.btn_disable_torque = ttk.Button(btn_grid, text="Disable Holding Torque", command=self.controller.disable, padding=btn_padding, style="Large.TButton")
+        self.btn_calibrate = ttk.Button(btn_grid, text="Calibration…", command=self._open_calibration, padding=btn_padding, style="Large.TButton")
+
+        # Place buttons in a 3x2 grid
+        self.btn_open.grid(row=0, column=0, sticky="nsew", padx=6, pady=6)
+        self.btn_close.grid(row=0, column=1, sticky="nsew", padx=6, pady=6)
+        self.btn_stop.grid(row=0, column=2, sticky="nsew", padx=6, pady=6)
+
+        self.btn_enable_torque.grid(row=1, column=0, sticky="nsew", padx=6, pady=6)
+        self.btn_disable_torque.grid(row=1, column=1, sticky="nsew", padx=6, pady=6)
+        self.btn_calibrate.grid(row=1, column=2, sticky="nsew", padx=6, pady=6)
+
+        # Make all columns/rows expand equally
+        for c in range(3):
+            btn_grid.grid_columnconfigure(c, weight=1)
+        for r in range(2):
+            btn_grid.grid_rowconfigure(r, weight=1)
+
         # ===== Flat Panel =====
-        # Give this more vertical presence (two-row layout + expand)
-        flat = ttk.LabelFrame(self, text="Flat Panel", padding=8)
-        flat.pack(fill=tk.BOTH, expand=True, pady=(0, 8))
+        flat = ttk.LabelFrame(content, text="Flat Panel", padding=8)
+        flat.grid(row=1, column=0, sticky="nsew")
 
         flat_row1 = ttk.Frame(flat)
         flat_row1.pack(fill=tk.X)
@@ -184,41 +224,6 @@ class MainWindow(ttk.Frame):
         )
         self.flat_pwm_scale.pack(side=tk.LEFT, fill=tk.X, expand=True)
         self.flat_pwm_scale.set(0)
-
-        # ===== Controls =====
-        ctrl = ttk.LabelFrame(self, text="Controls")
-        # Keep controls compact; let Flat Panel take more of the window.
-        ctrl.pack(fill=tk.X, expand=False, pady=(0, 8))
-
-        # Inner grid for buttons (3 columns x 2 rows) — buttons will expand equally
-        btn_grid = ttk.Frame(ctrl, padding=6)
-        btn_grid.pack(fill=tk.BOTH, expand=True)
-
-        btn_padding = 3
-
-        # Control buttons use the larger button style for readability
-        self.btn_open = ttk.Button(btn_grid, text="Open", command=self.controller.open_lid, padding=btn_padding, style="Large.TButton")
-        self.btn_close = ttk.Button(btn_grid, text="Close", command=self.controller.close_lid, padding=btn_padding, style="Large.TButton")
-        self.btn_stop = ttk.Button(btn_grid, text="Stop", command=self.controller.stop, padding=btn_padding, style="Large.TButton")
-
-        self.btn_enable_torque = ttk.Button(btn_grid, text="Enable Holding Torque", command=self.controller.enable, padding=btn_padding, style="Large.TButton")
-        self.btn_disable_torque = ttk.Button(btn_grid, text="Disable Holding Torque", command=self.controller.disable, padding=btn_padding, style="Large.TButton")
-        self.btn_calibrate = ttk.Button(btn_grid, text="Calibration…", command=self._open_calibration, padding=btn_padding, style="Large.TButton")
-
-        # Place buttons in a 3x2 grid
-        self.btn_open.grid(row=0, column=0, sticky="nsew", padx=6, pady=6)
-        self.btn_close.grid(row=0, column=1, sticky="nsew", padx=6, pady=6)
-        self.btn_stop.grid(row=0, column=2, sticky="nsew", padx=6, pady=6)
-
-        self.btn_enable_torque.grid(row=1, column=0, sticky="nsew", padx=6, pady=6)
-        self.btn_disable_torque.grid(row=1, column=1, sticky="nsew", padx=6, pady=6)
-        self.btn_calibrate.grid(row=1, column=2, sticky="nsew", padx=6, pady=6)
-
-        # Make all columns/rows expand equally so cells remain square when window is square
-        for c in range(3):
-            btn_grid.grid_columnconfigure(c, weight=1)
-        for r in range(2):
-            btn_grid.grid_rowconfigure(r, weight=1)
 
         # Device log removed — logs go to stdout
 
