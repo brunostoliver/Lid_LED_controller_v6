@@ -7,25 +7,24 @@ Wiring (pins referenced in firmware):
 - `EN_PIN`  = Arduino D9  -> Driver `EN` (active LOW)
 - `STEP_PIN`= Arduino D6  -> Driver `STEP`
 - `DIR_PIN` = Arduino D3  -> Driver `DIR`
-- `buttonOpenPin` = Arduino D7 -> Open limit switch / Open button (active-LOW)
-- `buttonClosePin` = Arduino D8 -> Close limit switch / Close button (active-LOW)
- - `buttonOpenPin` = Arduino D7 -> Manual Open button (active-LOW)
- - `buttonClosePin` = Arduino D8 -> Manual Close button (active-LOW)
- - `limitOpenPin` = Arduino D4 -> Dedicated OPEN limit switch (active-LOW)
- - `limitClosePin` = Arduino D5 -> Dedicated CLOSE limit switch (active-LOW)
+- `buttonPin` = Arduino D7 -> Single manual button (active-LOW)
+- `limitOpenPin` = Arduino D4 -> Dedicated OPEN limit switch (active-LOW)
+- `limitClosePin` = Arduino D5 -> Dedicated CLOSE limit switch (active-LOW)
 
 Limit switches / buttons
-- Manual push-buttons: wire each button between the pin (D7/D8) and GND so the input reads LOW when pressed. The firmware uses the internal `INPUT_PULLUP`.
-- Dedicated limit switches: wire each limit switch between the limit pin (A0/A1) and GND (active-LOW). The firmware checks these during motion and treats a trip as a limit event.
+- Manual push-button: wire the button between D7 and GND so the input reads LOW when pressed. The firmware uses the internal `INPUT_PULLUP`.
+- Dedicated limit switches: wire each limit switch between the limit pin (D4/D5) and GND (active-LOW). The firmware reports the live state over Serial and uses it to gate commands.
 
 Driver notes
 - TMC2209 `EN` is active-LOW. The firmware drives `EN` low to enable the driver.
 
 Behavior notes
-- During motion the firmware now detects limit-switch activation: if a limit switch trips while moving in the corresponding direction the firmware stops, sets the position to `0` (closed) or `MAX_STEPS` (open), and emits an event over Serial:
-  - `EVT LIMIT_OPEN pos=<N>`
-  - `EVT LIMIT_CLOSED pos=<N>`
-- The firmware also emits `EVT MOVE_STARTED dir=OPEN|CLOSE` and `EVT MOVE_DONE state=... pos=...`, plus a status snapshot. The PC app listens for `EVT ` lines and updates the UI accordingly.
+- The firmware emits live limit switch state changes as:
+  - `EVT LIMIT_STATE open=0/1 close=0/1`
+- OPEN/CLOSE commands (and the manual button) are gated when the corresponding end-stop is active.
+- Manual button behavior (single button on D7):
+  - If the lid is moving, pressing the button stops motion; the next press moves in the opposite direction.
+  - If the lid is idle, the button only acts when a limit switch is active (OPEN limit -> CLOSE, CLOSE limit -> OPEN).
 
 Uploading the firmware
 - Open `arduino_firmware_lid_led_controller_v5.ino` in the Arduino IDE (or PlatformIO).
@@ -33,3 +32,5 @@ Uploading the firmware
 - Compile and upload. Serial runs at 9600 baud.
 
 If you want to use separate physical limit switches (distinct from manual push-buttons), wire them to D7/D8 (as described) and avoid using those pins for separate momentary buttons, or change the pin assignment in the `.ino` accordingly.
+
+Note: D8 is not used by the current firmware.
