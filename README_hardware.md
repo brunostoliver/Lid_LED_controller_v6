@@ -31,6 +31,6 @@ Uploading the firmware
 - Select `Arduino Uno` (or your board) and the correct serial port.
 - Compile and upload. Serial runs at 9600 baud.
 
-If you want to use separate physical limit switches (distinct from manual push-buttons), wire them to D7/D8 (as described) and avoid using those pins for separate momentary buttons, or change the pin assignment in the `.ino` accordingly.
+If you want different pin assignments (buttons/limits), change the pin constants in `arduino_firmware_lid_led_controller_v5.ino` and update this README accordingly.
 
 Note: D8 is not used by the current firmware.
