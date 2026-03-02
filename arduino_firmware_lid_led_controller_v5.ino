@@ -5,8 +5,7 @@
     EN_PIN  = 9
     STEP_PIN= 6
     DIR_PIN = 3
-    buttonOpenPin  = 7
-    buttonClosePin = 8
+    buttonPin = 7
 
   Serial: 9600 baud
   Timing: pulseDelay = 500   (microseconds between step edges)
@@ -25,9 +24,8 @@
   Notes:
     - Direction "OPEN" is a logical direction; if your lid runs the wrong way,
       set INVERT_DIR to true OR swap one motor coil pair.
-    - Limit switches / buttons are wired active-LOW to pins 7 (OPEN) and 8 (CLOSE)
-      and use the internal `INPUT_PULLUP` resistor. Wire each switch between
-      the pin and GND.
+    - Manual button is wired active-LOW to pin 7 and uses INPUT_PULLUP.
+      Wire the switch between the pin and GND.
 */
 
 #include <EEPROM.h>
@@ -37,8 +35,7 @@ const int EN_PIN   = 9;
 const int STEP_PIN = 6;
 const int DIR_PIN  = 3;
 
-const int buttonOpenPin  = 7;   // manual open button (active-LOW)
-const int buttonClosePin = 8;   // manual close button (active-LOW)
+const int buttonPin = 7;        // single manual button (active-LOW)
 
 // Dedicated limit switch pins (separate from manual buttons)
 const int limitOpenPin  = 4;    // limit switch for fully OPEN (active-LOW)
@@ -73,13 +70,18 @@ long maxSteps = DEFAULT_MAX_STEPS;
 long teachOpenPos = -1;
 long teachClosedPos = -1;
 
-// Button debouncing
-int lastOpenReading  = HIGH;  // using INPUT_PULLUP -> HIGH = not pressed
-int lastCloseReading = HIGH;
-int stableOpenState  = HIGH;
-int stableCloseState = HIGH;
-unsigned long lastOpenChangeMs  = 0;
-unsigned long lastCloseChangeMs = 0;
+// Button debouncing (single button)
+int lastBtnReading = HIGH;     // using INPUT_PULLUP -> HIGH = not pressed
+int stableBtnState = HIGH;
+unsigned long lastBtnChangeMs = 0;
+
+// Single-button behavior:
+// - If moving: press stops motion and arms a "reverse" action
+// - If idle: button only works when a limit is active (OPEN->CLOSE, CLOSE->OPEN)
+// - If idle and reverse is armed: press moves to opposite end-stop
+bool reverseArmed = false;
+bool lastMoveDirOpen = false;
+bool lastMoveDirValid = false;
 
 // Track current move direction so pollButtons can detect limit switches
 bool currentDirOpen = false;
@@ -135,6 +137,10 @@ void moveTo(long targetSteps)
   const bool dirOpen = (targetSteps > positionSteps);
   setDir(dirOpen);
 
+  // remember last move direction (for single-button reverse after STOP)
+  lastMoveDirOpen = dirOpen;
+  lastMoveDirValid = true;
+
   // remember direction for limit detection
   currentDirOpen = dirOpen;
 
@@ -162,6 +168,11 @@ void moveTo(long targetSteps)
 
   moving = false;
 
+  // If the move completed normally (not stopped), disarm reverse.
+  if (!stopRequested) {
+    reverseArmed = false;
+  }
+
   // Announce move done and current state
   {
     const char *state = (positionSteps >= maxSteps) ? "OPEN" : ((positionSteps <= 0) ? "CLOSED" : "PARTIAL");
@@ -180,9 +191,8 @@ void pollButtons(bool allowImmediateAction)
 {
   unsigned long nowMs = millis();
 
-  // Read raw for manual buttons
-  int openReading  = digitalRead(buttonOpenPin);
-  int closeReading = digitalRead(buttonClosePin);
+  // Read raw for manual button
+  int btnReading = digitalRead(buttonPin);
 
   // Read raw for dedicated limit switches (separate from manual buttons)
   int limitOpenReading  = digitalRead(limitOpenPin);
@@ -204,46 +214,53 @@ void pollButtons(bool allowImmediateAction)
   }
   // NOTE: Limits no longer auto-stop motion. They only report state and can block commands.
 
-  // Debounce OPEN button
-  if (openReading != lastOpenReading) {
-    lastOpenChangeMs = nowMs;
-    lastOpenReading = openReading;
-  } else if ((nowMs - lastOpenChangeMs) >= debounceDelay) {
-    if (stableOpenState != openReading) {
-      stableOpenState = openReading;
-      if (stableOpenState == LOW) {
-        // Open button pressed (active LOW)
-        if (allowImmediateAction && !moving) {
-          if (limitOpenActive && positionSteps >= (maxSteps - LIMIT_POS_TOL)) {
-            Serial.println(F("EVT OPEN_BLOCKED reason=LIMIT_OPEN"));
-            emitStatusJSON();
-          } else {
-            stopRequested = false;
-            moveTo(maxSteps);
-          }
+  // Debounce button
+  if (btnReading != lastBtnReading) {
+    lastBtnChangeMs = nowMs;
+    lastBtnReading = btnReading;
+  } else if ((nowMs - lastBtnChangeMs) >= debounceDelay) {
+    if (stableBtnState != btnReading) {
+      stableBtnState = btnReading;
+      if (stableBtnState == LOW) {
+        // Button pressed (active LOW)
+        if (!allowImmediateAction) {
+          return;
         }
-      }
-    }
-  }
 
-  // Debounce CLOSE button
-  if (closeReading != lastCloseReading) {
-    lastCloseChangeMs = nowMs;
-    lastCloseReading = closeReading;
-  } else if ((nowMs - lastCloseChangeMs) >= debounceDelay) {
-    if (stableCloseState != closeReading) {
-      stableCloseState = closeReading;
-      if (stableCloseState == LOW) {
-        // Close button pressed (active LOW)
-        if (allowImmediateAction && !moving) {
-          if (limitCloseActive && positionSteps <= LIMIT_POS_TOL) {
-            Serial.println(F("EVT CLOSE_BLOCKED reason=LIMIT_CLOSE"));
-            emitStatusJSON();
-          } else {
-            stopRequested = false;
-            moveTo(0);
-          }
+        if (moving) {
+          // Press while moving: STOP and arm a reverse action.
+          stopRequested = true;
+          reverseArmed = true;
+          Serial.println(F("EVT BTN_STOP"));
+          emitStatusJSON();
+          return;
         }
+
+        // Idle behavior:
+        // - If reverse is armed from a prior STOP, go opposite direction.
+        // - Otherwise, only act if a limit is active.
+        if (reverseArmed && lastMoveDirValid) {
+          reverseArmed = false;
+          stopRequested = false;
+          moveTo(lastMoveDirOpen ? 0 : maxSteps);
+          return;
+        }
+
+        if (limitCloseActive) {
+          stopRequested = false;
+          moveTo(maxSteps);
+          return;
+        }
+
+        if (limitOpenActive) {
+          stopRequested = false;
+          moveTo(0);
+          return;
+        }
+
+        // Neither limit active: do nothing by design.
+        Serial.println(F("EVT BTN_IGNORED reason=NO_LIMIT"));
+        emitStatusJSON();
       }
     }
   }
@@ -344,8 +361,7 @@ void setup()
   pinMode(STEP_PIN, OUTPUT);
   pinMode(DIR_PIN,  OUTPUT);
 
-  pinMode(buttonOpenPin,  INPUT_PULLUP);
-  pinMode(buttonClosePin, INPUT_PULLUP);
+  pinMode(buttonPin,  INPUT_PULLUP);
   pinMode(limitOpenPin,   INPUT_PULLUP);
   pinMode(limitClosePin,  INPUT_PULLUP);
 
