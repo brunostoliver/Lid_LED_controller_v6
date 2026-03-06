@@ -63,6 +63,10 @@ const unsigned long EEPROM_MAGIC = 0x4C494443UL; // "LIDC"
 // If your lid moves the opposite way, flip this to true.
 const bool INVERT_DIR = false;
 
+// Keep LED panel behavior simple like previous firmware:
+// direct PWM brightness control (0..255) with no inversion/remapping.
+const int FLAT_PWM_DEFAULT_ON = 0;
+
 // Safety: minimum enable delay before stepping (us)
 const unsigned long ENABLE_SETTLE_US = 1000;
 
@@ -110,6 +114,7 @@ void serviceSerialDuringMove(); // Add forward declaration
 void applyFlatOutput();
 void setFlatOn(bool on);
 void setFlatBrightness(int pwm);
+void configureFlatPwmTimer();
 
 /////////////////////// Helpers ///////////////////////////////////////////////
 void setEnable(bool en)
@@ -138,6 +143,21 @@ inline void singleStep()
   delayMicroseconds(pulseDelay);
 }
 
+// Configure PWM frequency for the flat panel output.
+// On Arduino Uno, D10 uses Timer1.
+// Raise PWM to ultrasonic (~31.37 kHz) to reduce visible flicker/banding
+// in long-exposure and rolling-shutter camera captures.
+void configureFlatPwmTimer()
+{
+  // Timer1 phase-correct 8-bit PWM, TOP=0x00FF, prescaler=1:
+  // fPWM = 16 MHz / (1 * 510) ~= 31.37 kHz on OC1B (D10).
+  //
+  // Keep COM1A disconnected so D9 can remain a normal digital EN pin.
+  TCCR1A = _BV(COM1B1) | _BV(WGM10);
+  TCCR1B = _BV(CS10);
+  OCR1B = 0;
+}
+
 void applyFlatOutput()
 {
   if (flatOn && flatPwm > 0) {
@@ -149,7 +169,16 @@ void applyFlatOutput()
 
 void setFlatOn(bool on)
 {
+  // Skip redundant command noise.
+  if (flatOn == on && (!on || flatPwm > 0)) {
+    return;
+  }
+
+  if (on && flatPwm <= 0) {
+    flatPwm = constrain(FLAT_PWM_DEFAULT_ON, FLAT_PWM_MIN, FLAT_PWM_MAX);
+  }
   flatOn = on;
+
   applyFlatOutput();
   Serial.print(F("EVT FLAT on="));
   Serial.print(flatOn ? 1 : 0);
@@ -160,7 +189,16 @@ void setFlatOn(bool on)
 
 void setFlatBrightness(int pwm)
 {
-  flatPwm = constrain(pwm, FLAT_PWM_MIN, FLAT_PWM_MAX);
+  int newPwm = constrain(pwm, FLAT_PWM_MIN, FLAT_PWM_MAX);
+  bool newOn = (newPwm > 0);
+
+  if (flatPwm == newPwm && flatOn == newOn) {
+    return;
+  }
+
+  flatPwm = newPwm;
+  // Mirror old firmware behavior: brightness command directly controls output.
+  flatOn = newOn;
   applyFlatOutput();
   Serial.print(F("EVT FLAT pwm="));
   Serial.println(flatPwm);
@@ -320,7 +358,7 @@ String cleaned(const String& s)
 
 void printHelp()
 {
-  Serial.println(F("Commands: OPEN | CLOSE | STOP | POS? | STATUS? | STATUS_JSON? | LIMITS? | ENABLE | DISABLE | FLAT.ON | FLAT.OFF | FLAT.BRIGHT N(0-255) | CAL.START | CAL.SETOPEN | CAL.SETCLOSED | CAL.SAVE | CAL.ABORT | CAL.DEFAULTS | CAL.STATUS? | J+ N | J- N"));
+  Serial.println(F("Commands: OPEN | CLOSE | STOP | POS? | STATUS? | STATUS_JSON? | LIMITS? | ENABLE | DISABLE | FLAT.ON | FLAT.OFF | FLAT.BRIGHT N(0-255) | LED N(0-255) | CAL.START | CAL.SETOPEN | CAL.SETCLOSED | CAL.SAVE | CAL.ABORT | CAL.DEFAULTS | CAL.STATUS? | J+ N | J- N"));
 }
 
 void printStatus()
@@ -413,6 +451,8 @@ void setup()
   pinMode(limitOpenPin,   INPUT_PULLUP);
   pinMode(limitClosePin,  INPUT_PULLUP);
 
+  configureFlatPwmTimer();
+
   // Safe default: disabled on boot
   setEnable(false);
 
@@ -499,6 +539,16 @@ void loop()
         pwm = cmd.substring(spaceIdx + 1).toInt();
       }
       setFlatBrightness(pwm);
+    }
+    else if (cmd.startsWith(F("LED"))) {
+      // Backward-compatible alias with older firmware: LED 0..255
+      int spaceIdx = cmd.indexOf(' ');
+      if (spaceIdx > 0 && spaceIdx < (int)cmd.length() - 1) {
+        int pwm = cmd.substring(spaceIdx + 1).toInt();
+        setFlatBrightness(pwm);
+      } else {
+        Serial.println(F("LED command format error. Use: LED <value>"));
+      }
     }
     else if (cmd == F("CAL.START")) {
       calibrationActive = true;
@@ -616,23 +666,6 @@ void serviceSerialDuringMove()
       {
         stopRequested = true;
         Serial.println(F("STOP requested."));
-      }
-      else if (cmd == F("FLAT.ON"))
-      {
-        setFlatOn(true);
-      }
-      else if (cmd == F("FLAT.OFF"))
-      {
-        setFlatOn(false);
-      }
-      else if (cmd.startsWith(F("FLAT.BRIGHT")))
-      {
-        int spaceIdx = cmd.indexOf(' ');
-        int pwm = 0;
-        if (spaceIdx > 0 && spaceIdx < (int)cmd.length() - 1) {
-          pwm = cmd.substring(spaceIdx + 1).toInt();
-        }
-        setFlatBrightness(pwm);
       }
       else if (cmd == F("ENABLE"))
       {

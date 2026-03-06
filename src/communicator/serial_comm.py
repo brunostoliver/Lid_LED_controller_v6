@@ -97,22 +97,27 @@ class SerialClient:
 
             # Use short reads during handshake to keep connection snappy.
             original_timeout = self._ser.timeout
-            self._ser.timeout = min(0.2, float(self.read_timeout)) if self.read_timeout > 0 else 0.2
+            self._ser.timeout = min(0.15, float(self.read_timeout)) if self.read_timeout > 0 else 0.15
 
-            # Optional READY wait: some boards reset on open, others don't.
-            # Do not fail solely because READY was not observed.
-            ready_seen = self._wait_for_ready_banner(timeout=2.0)
+            # Fast path: many devices can answer STATUS immediately.
+            # This avoids waiting on READY/HELLO when the board did not reset on open.
+            status = self.request_status_json(query_timeout=0.35)
 
-            # HELLO handshake (optional for backward-compatible firmware)
-            if not self._exchange_expect("HELLO\n", prefix="HELLO ", timeout=0.8):
-                self._emit("line", {}, raw="HELLO handshake not supported by firmware; continuing")
+            # Slow path fallback: Uno-style auto-reset boards need startup time.
+            if status is None:
+                # Optional READY wait: do not fail solely because READY was not observed.
+                ready_seen = self._wait_for_ready_banner(timeout=1.2)
 
-            # Get initial status to prime the GUI (JSON preferred, text fallback)
-            status = self.request_status_json(query_timeout=0.8)
-            if status is None and ready_seen:
-                # Brief retry for boards that are still finishing startup prints.
-                time.sleep(0.25)
-                status = self.request_status_json(query_timeout=0.8)
+                # HELLO handshake (optional for backward-compatible firmware)
+                if not self._exchange_expect("HELLO\n", prefix="HELLO ", timeout=0.3):
+                    self._emit("line", {}, raw="HELLO handshake not supported by firmware; continuing")
+
+                # Get initial status to prime the GUI (JSON preferred, text fallback)
+                status = self.request_status_json(query_timeout=0.45)
+                if status is None and ready_seen:
+                    # Brief retry for boards that are still finishing startup prints.
+                    time.sleep(0.12)
+                    status = self.request_status_json(query_timeout=0.45)
             if status is None:
                 self._emit("error", {"reason": "Initial STATUS query failed"}, raw="")
                 self.disconnect()

@@ -44,6 +44,8 @@ class LidController:
         }
 
         self.connected_port: Optional[str] = None
+        self._last_flat_pwm_sent: Optional[int] = None
+        self._last_flat_on_sent: Optional[bool] = None
 
     # ---------------------------- GUI-to-Controller API -----------------------
 
@@ -67,6 +69,8 @@ class LidController:
             self.client.disconnect()
         self._post_ui({"type": "log", "text": "Disconnected"})
         self.connected_port = None
+        self._last_flat_pwm_sent = None
+        self._last_flat_on_sent = None
 
     def is_connected(self) -> bool:
         return self.client.is_connected()
@@ -93,10 +97,16 @@ class LidController:
 
     # ----- flat panel -----
     def flat_on(self) -> None:
+        if self._last_flat_on_sent is True:
+            return
         self.client.send("FLAT.ON")
+        self._last_flat_on_sent = True
 
     def flat_off(self) -> None:
+        if self._last_flat_on_sent is False:
+            return
         self.client.send("FLAT.OFF")
+        self._last_flat_on_sent = False
 
     def flat_brightness(self, pwm: int) -> None:
         try:
@@ -104,7 +114,11 @@ class LidController:
         except Exception:
             v = 0
         v = max(0, min(255, v))
+        if self._last_flat_pwm_sent == v:
+            return
         self.client.send(f"FLAT.BRIGHT {v}")
+        self._last_flat_pwm_sent = v
+        self._last_flat_on_sent = (v > 0)
 
     # ----- calibration (teach mode) -----
     def cal_start(self):       self.client.send("CAL.START")

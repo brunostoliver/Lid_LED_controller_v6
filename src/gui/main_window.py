@@ -503,9 +503,6 @@ class MainWindow(ttk.Frame):
     def _send_flat_brightness(self, pwm: int) -> None:
         self._flat_send_after_id = None
         self.controller.flat_brightness(pwm)
-        # If currently ON, keep output enabled while changing brightness.
-        if int(self.flat_on_var.get()) != 0:
-            self.controller.flat_on()
 
     # ----------------------------- Status helpers ----------------------------
 
