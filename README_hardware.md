@@ -30,6 +30,14 @@ Flat LED panel (optional; PWM via MOSFET)
 - This applies to the firmware/GUI version that includes flat-panel PWM support (the `feature/flat-panel-pwm` branch).
 - The Arduino drives a MOSFET module with PWM on `FLAT_PWM_PIN = D10`.
 
+Important note for EL inverters
+- If you are powering a DC-AC micro-inverter (e.g., for an EL panel) through the MOSFET, low-frequency PWM power switching can prevent the inverter from starting.
+- The current firmware configures D10 (Timer1) for a higher PWM frequency (~31 kHz) to improve inverter behavior, but some inverters still require steady DC input.
+- If the panel lights when the inverter is connected directly to 12V but not when PWM’d, try:
+  - testing with Brightness=255 (near steady ON),
+  - using ON/OFF control only (no dimming), or
+  - using an inverter that supports dimming via a dedicated control input.
+
 Typical wiring (low-side switching)
 - 12V supply `+` -> Flat panel `+`
 - Flat panel `-` -> MOSFET module load output (often labeled `OUT-`, `LOAD-`, or `DRAIN`)
