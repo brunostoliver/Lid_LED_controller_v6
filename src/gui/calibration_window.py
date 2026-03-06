@@ -20,13 +20,24 @@ from __future__ import annotations
 import tkinter as tk
 from tkinter import ttk
 import tkinter.font as tkfont
+import ctypes
 
 
 class CalibrationWindow(tk.Toplevel):
+    DARK_BG = "#111418"
+    DARK_SURFACE = "#1b2027"
+    DARK_SURFACE_ALT = "#222a33"
+    DARK_BORDER = "#2f3945"
+    DARK_TEXT = "#d8dee9"
+    DARK_MUTED = "#98a3b3"
+    DARK_SUCCESS = "#7fdc9a"
+
     def __init__(self, master, controller):
         super().__init__(master)
         self.title("Calibration (Teach Mode)")
         self.controller = controller
+        self._apply_dark_theme()
+        self._apply_dark_title_bar()
 
         self.resizable(False, False)
         self.protocol("WM_DELETE_WINDOW", self._on_close)
@@ -40,7 +51,7 @@ class CalibrationWindow(tk.Toplevel):
         self.saved_state_var = tk.StringVar(value="Not saved")
 
         # Layout
-        root = ttk.Frame(self, padding=10)
+        root = ttk.Frame(self, padding=10, style="Dark.TFrame")
         root.pack(fill=tk.BOTH, expand=True)
 
         # Shared larger button style for better readability
@@ -79,7 +90,7 @@ class CalibrationWindow(tk.Toplevel):
         ttk.Button(act, text="Save Calibration", command=self.controller.cal_save, style="Large.TButton").pack(side=tk.LEFT, padx=6, pady=6)
         ttk.Button(act, text="Restore Defaults", command=self.controller.cal_defaults, style="Large.TButton").pack(side=tk.LEFT, padx=18, pady=6)
         ttk.Label(act, text="Status:").pack(side=tk.LEFT, padx=(18, 6))
-        ttk.Label(act, textvariable=self.saved_state_var, foreground="#006600").pack(side=tk.LEFT, padx=(0, 6))
+        ttk.Label(act, textvariable=self.saved_state_var, foreground=self.DARK_SUCCESS).pack(side=tk.LEFT, padx=(0, 6))
 
         # ===== Status row =====
         r0 = ttk.Frame(root); r0.pack(fill=tk.X, pady=(0, 8))
@@ -108,7 +119,7 @@ class CalibrationWindow(tk.Toplevel):
         ttk.Button(sp, text="Teach Closed", command=self._teach_closed, style="Large.TButton").pack(side=tk.LEFT, padx=6, pady=6)
 
         # Info line
-        ttk.Label(root, textvariable=self.info_var, foreground="#444").pack(fill=tk.X, pady=(6, 0))
+        ttk.Label(root, textvariable=self.info_var, foreground=self.DARK_MUTED).pack(fill=tk.X, pady=(6, 0))
 
         # Start calibration immediately and request fresh status
         try:
@@ -121,6 +132,66 @@ class CalibrationWindow(tk.Toplevel):
 
         # Initial button gating (assume closed at startup → disable Close)
         self._refresh_move_buttons(cal_active=True, pos=0)
+
+    def _apply_dark_theme(self) -> None:
+        try:
+            self.configure(bg=self.DARK_BG)
+        except Exception:
+            pass
+
+        style = ttk.Style(self)
+        try:
+            style.theme_use("clam")
+        except Exception:
+            pass
+
+        style.configure(
+            ".",
+            background=self.DARK_BG,
+            foreground=self.DARK_TEXT,
+            fieldbackground=self.DARK_SURFACE,
+            bordercolor=self.DARK_BORDER,
+            lightcolor=self.DARK_BORDER,
+            darkcolor=self.DARK_BORDER,
+            troughcolor=self.DARK_SURFACE_ALT,
+            insertcolor=self.DARK_TEXT,
+        )
+        style.configure("Dark.TFrame", background=self.DARK_BG)
+        style.configure("TFrame", background=self.DARK_BG)
+        style.configure("TLabel", background=self.DARK_BG, foreground=self.DARK_TEXT)
+        style.configure("TLabelframe", background=self.DARK_BG, bordercolor=self.DARK_BORDER)
+        style.configure("TLabelframe.Label", background=self.DARK_BG, foreground=self.DARK_TEXT)
+        style.configure("TButton", background=self.DARK_SURFACE, foreground=self.DARK_TEXT, borderwidth=1)
+        style.map(
+            "TButton",
+            background=[("active", self.DARK_SURFACE_ALT), ("disabled", self.DARK_BG)],
+            foreground=[("disabled", self.DARK_MUTED)],
+        )
+        style.configure(
+            "TEntry",
+            fieldbackground=self.DARK_SURFACE,
+            foreground=self.DARK_TEXT,
+            bordercolor=self.DARK_BORDER,
+        )
+
+    def _apply_dark_title_bar(self) -> None:
+        # Best-effort Windows title bar dark mode.
+        if not str(self.tk.call("tk", "windowingsystem")).lower().startswith("win"):
+            return
+        try:
+            self.update_idletasks()
+            hwnd = ctypes.windll.user32.GetParent(self.winfo_id())
+            value = ctypes.c_int(1)
+            dwm = ctypes.windll.dwmapi
+            for attr in (20, 19):  # Win10/11 attribute IDs
+                dwm.DwmSetWindowAttribute(
+                    ctypes.c_void_p(hwnd),
+                    ctypes.c_uint(attr),
+                    ctypes.byref(value),
+                    ctypes.sizeof(value),
+                )
+        except Exception:
+            pass
 
     # --------- callbacks from MainWindow ---------
 

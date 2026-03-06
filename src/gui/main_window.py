@@ -16,6 +16,7 @@ from pathlib import Path
 import tkinter as tk
 from tkinter import ttk, messagebox
 import tkinter.font as tkfont
+import ctypes
 
 from src.controller.lid_controller import LidController
 from src.config.settings import APP_TITLE, WINDOW_MIN_W, WINDOW_MIN_H
@@ -25,10 +26,21 @@ from src.gui.calibration_window import CalibrationWindow
 class MainWindow(ttk.Frame):
     POLL_MS = 100  # UI queue poll interval (ms)
     PREFS_PATH = Path(__file__).resolve().parents[2] / "output" / "gui_prefs.json"
+    DARK_BG = "#111418"
+    DARK_SURFACE = "#1b2027"
+    DARK_SURFACE_ALT = "#222a33"
+    DARK_BORDER = "#2f3945"
+    DARK_TEXT = "#d8dee9"
+    DARK_MUTED = "#98a3b3"
+    DARK_ACCENT = "#5eb3ff"
+    DARK_DANGER = "#ff6b6b"
 
     def __init__(self, master: tk.Tk, controller: LidController):
         super().__init__(master, padding=10)
         self.controller = controller
+        self._apply_dark_theme(master)
+        self._apply_dark_title_bar(master)
+        self.configure(style="Dark.TFrame")
         self.pack(fill=tk.BOTH, expand=True)
 
         master.title(APP_TITLE)
@@ -58,6 +70,89 @@ class MainWindow(ttk.Frame):
         self.after(self.POLL_MS, self._poll_ui_queue)
 
     # ------------------------------ UI ---------------------------------------
+
+    def _apply_dark_theme(self, master: tk.Tk) -> None:
+        try:
+            master.configure(bg=self.DARK_BG)
+        except Exception:
+            pass
+
+        style = ttk.Style(master)
+        try:
+            style.theme_use("clam")
+        except Exception:
+            pass
+
+        style.configure(
+            ".",
+            background=self.DARK_BG,
+            foreground=self.DARK_TEXT,
+            fieldbackground=self.DARK_SURFACE,
+            bordercolor=self.DARK_BORDER,
+            lightcolor=self.DARK_BORDER,
+            darkcolor=self.DARK_BORDER,
+            troughcolor=self.DARK_SURFACE_ALT,
+            insertcolor=self.DARK_TEXT,
+        )
+        style.configure("Dark.TFrame", background=self.DARK_BG)
+        style.configure("TFrame", background=self.DARK_BG)
+        style.configure("TLabel", background=self.DARK_BG, foreground=self.DARK_TEXT)
+        style.configure("TLabelframe", background=self.DARK_BG, bordercolor=self.DARK_BORDER)
+        style.configure("TLabelframe.Label", background=self.DARK_BG, foreground=self.DARK_TEXT)
+        style.configure("TButton", background=self.DARK_SURFACE, foreground=self.DARK_TEXT, borderwidth=1)
+        style.map(
+            "TButton",
+            background=[("active", self.DARK_SURFACE_ALT), ("disabled", self.DARK_BG)],
+            foreground=[("disabled", self.DARK_MUTED)],
+        )
+        style.configure("TCheckbutton", background=self.DARK_BG, foreground=self.DARK_TEXT)
+        style.map("TCheckbutton", foreground=[("disabled", self.DARK_MUTED)])
+        style.configure(
+            "TEntry",
+            fieldbackground=self.DARK_SURFACE,
+            foreground=self.DARK_TEXT,
+            bordercolor=self.DARK_BORDER,
+        )
+        style.map("TEntry", fieldbackground=[("disabled", self.DARK_BG)])
+        style.configure(
+            "TCombobox",
+            fieldbackground=self.DARK_SURFACE,
+            background=self.DARK_SURFACE,
+            foreground=self.DARK_TEXT,
+            arrowcolor=self.DARK_TEXT,
+            bordercolor=self.DARK_BORDER,
+        )
+        style.map(
+            "TCombobox",
+            fieldbackground=[("readonly", self.DARK_SURFACE), ("disabled", self.DARK_BG)],
+            foreground=[("readonly", self.DARK_TEXT), ("disabled", self.DARK_MUTED)],
+            selectbackground=[("readonly", self.DARK_SURFACE_ALT)],
+            selectforeground=[("readonly", self.DARK_TEXT)],
+        )
+        style.configure(
+            "Horizontal.TScale",
+            background=self.DARK_BG,
+            troughcolor=self.DARK_SURFACE_ALT,
+        )
+
+    def _apply_dark_title_bar(self, window: tk.Misc) -> None:
+        # Best-effort Windows title bar dark mode.
+        if not str(window.tk.call("tk", "windowingsystem")).lower().startswith("win"):
+            return
+        try:
+            window.update_idletasks()
+            hwnd = ctypes.windll.user32.GetParent(window.winfo_id())
+            value = ctypes.c_int(1)
+            dwm = ctypes.windll.dwmapi
+            for attr in (20, 19):  # Win10/11 attribute IDs
+                dwm.DwmSetWindowAttribute(
+                    ctypes.c_void_p(hwnd),
+                    ctypes.c_uint(attr),
+                    ctypes.byref(value),
+                    ctypes.sizeof(value),
+                )
+        except Exception:
+            pass
 
     def _build_widgets(self):
         # Shared larger button style for better readability
@@ -113,7 +208,7 @@ class MainWindow(ttk.Frame):
 
         ttk.Label(status1, text="Lid:", font=label_font).pack(side=tk.LEFT)
         self.lid_text_var = tk.StringVar(value="UNKNOWN")
-        ttk.Label(status1, textvariable=self.lid_text_var, font=status_font, foreground="#0066cc").pack(side=tk.LEFT, padx=(12, 24))
+        ttk.Label(status1, textvariable=self.lid_text_var, font=status_font, foreground=self.DARK_ACCENT).pack(side=tk.LEFT, padx=(12, 24))
 
         ttk.Label(status1, text="Connection:", font=label_font).pack(side=tk.LEFT)
         ttk.Label(status1, textvariable=self.conn_text_var, font=status_font).pack(side=tk.LEFT, padx=(12, 0))
@@ -135,7 +230,7 @@ class MainWindow(ttk.Frame):
         open_row.pack(fill=tk.X, pady=4)
         ttk.Label(open_row, text="Open Limit:", font=label_font).pack(side=tk.LEFT)
         self.limit_open_var = tk.StringVar(value="OFF")
-        self.limit_open_label = ttk.Label(open_row, textvariable=self.limit_open_var, font=status_font, foreground="#ff0000")
+        self.limit_open_label = ttk.Label(open_row, textvariable=self.limit_open_var, font=status_font, foreground=self.DARK_DANGER)
         self.limit_open_label.pack(side=tk.LEFT, padx=(12, 0))
 
         # Close Limit
@@ -143,7 +238,7 @@ class MainWindow(ttk.Frame):
         close_row.pack(fill=tk.X, pady=4)
         ttk.Label(close_row, text="Close Limit:", font=label_font).pack(side=tk.LEFT)
         self.limit_close_var = tk.StringVar(value="OFF")
-        self.limit_close_label = ttk.Label(close_row, textvariable=self.limit_close_var, font=status_font, foreground="#ff0000")
+        self.limit_close_label = ttk.Label(close_row, textvariable=self.limit_close_var, font=status_font, foreground=self.DARK_DANGER)
         self.limit_close_label.pack(side=tk.LEFT, padx=(12, 0))
 
         # ===== Main content area (Controls + Flat Panel share space) =====
@@ -583,8 +678,8 @@ class MainWindow(ttk.Frame):
         self.limit_open_var.set("ON" if open_triggered else "OFF")
         self.limit_close_var.set("ON" if close_triggered else "OFF")
         # Highlight limits when triggered (red when ON, normal when OFF)
-        self.limit_open_label.config(foreground="#ff0000" if open_triggered else "#000000")
-        self.limit_close_label.config(foreground="#ff0000" if close_triggered else "#000000")
+        self.limit_open_label.config(foreground=self.DARK_DANGER if open_triggered else self.DARK_TEXT)
+        self.limit_close_label.config(foreground=self.DARK_DANGER if close_triggered else self.DARK_TEXT)
 
     def _extract_evt_int(self, raw: str, key: str):
         token = f"{key}="
