@@ -66,6 +66,8 @@ const bool INVERT_DIR = false;
 // Keep LED panel behavior simple like previous firmware:
 // direct PWM brightness control (0..255) with no inversion/remapping.
 const int FLAT_PWM_DEFAULT_ON = 0;
+const bool FLAT_PWM_LOW_END_COMP = true;
+const int FLAT_PWM_MIN_EFFECTIVE = 12; // output floor used when command is 1
 
 // Safety: minimum enable delay before stepping (us)
 const unsigned long ENABLE_SETTLE_US = 1000;
@@ -115,6 +117,7 @@ void applyFlatOutput();
 void setFlatOn(bool on);
 void setFlatBrightness(int pwm);
 void configureFlatPwmTimer();
+uint8_t mapFlatPwmOutput(int pwm);
 
 /////////////////////// Helpers ///////////////////////////////////////////////
 void setEnable(bool en)
@@ -145,10 +148,11 @@ inline void singleStep()
 
 // Configure PWM frequency for the flat panel output.
 // On Arduino Uno, D10 uses Timer1.
-// Raise PWM to ultrasonic (~31.37 kHz) to reduce visible flicker/banding
-// in long-exposure and rolling-shutter camera captures.
+// Use ultrasonic PWM (~31.37 kHz) to reduce flicker/banding in camera flats.
+// Low-end compensation keeps small command values usable.
 void configureFlatPwmTimer()
 {
+#if defined(TCCR1A) && defined(TCCR1B) && defined(COM1B1) && defined(WGM10) && defined(CS10) && defined(OCR1B)
   // Timer1 phase-correct 8-bit PWM, TOP=0x00FF, prescaler=1:
   // fPWM = 16 MHz / (1 * 510) ~= 31.37 kHz on OC1B (D10).
   //
@@ -156,12 +160,31 @@ void configureFlatPwmTimer()
   TCCR1A = _BV(COM1B1) | _BV(WGM10);
   TCCR1B = _BV(CS10);
   OCR1B = 0;
+#else
+  // Boards like Nano Every use different timer registers; leave PWM at the core default.
+#endif
+}
+
+uint8_t mapFlatPwmOutput(int pwm)
+{
+  pwm = constrain(pwm, FLAT_PWM_MIN, FLAT_PWM_MAX);
+  if (pwm <= 0) {
+    return 0;
+  }
+  if (!FLAT_PWM_LOW_END_COMP) {
+    return (uint8_t)pwm;
+  }
+
+  // Lift the low end while preserving 255 -> 255.
+  long out = FLAT_PWM_MIN_EFFECTIVE +
+             ((long)(pwm - 1) * (FLAT_PWM_MAX - FLAT_PWM_MIN_EFFECTIVE)) / (FLAT_PWM_MAX - 1);
+  return (uint8_t)constrain((int)out, FLAT_PWM_MIN, FLAT_PWM_MAX);
 }
 
 void applyFlatOutput()
 {
   if (flatOn && flatPwm > 0) {
-    analogWrite(FLAT_PWM_PIN, constrain(flatPwm, FLAT_PWM_MIN, FLAT_PWM_MAX));
+    analogWrite(FLAT_PWM_PIN, mapFlatPwmOutput(flatPwm));
   } else {
     analogWrite(FLAT_PWM_PIN, 0);
   }
