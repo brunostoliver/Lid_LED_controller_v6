@@ -57,6 +57,7 @@ const int FLAT_PWM_MAX = 255;
 // EEPROM calibration storage
 const int EEPROM_MAGIC_ADDR = 0;
 const int EEPROM_MAX_ADDR = EEPROM_MAGIC_ADDR + sizeof(unsigned long);
+const int EEPROM_STORAGE_SIZE = EEPROM_MAX_ADDR + sizeof(long);
 const unsigned long EEPROM_MAGIC = 0x4C494443UL; // "LIDC"
 
 /////////////////////// Behavior Tweaks ///////////////////////////////////////
@@ -106,12 +107,14 @@ bool currentDirOpen = false;
 // Last-published physical limit states (active-LOW switches)
 bool lastLimitOpenActive = false;
 bool lastLimitCloseActive = false;
+bool persistentStorageReady = true;
 
 /////////////////////// Forward Declarations (fix compile order) //////////////
 void pollButtons(bool allowImmediateAction = true);
 void emitStatusJSON();
 void saveCalibratedMaxSteps();
 void loadCalibratedMaxSteps();
+void initPersistentStorage();
 void serviceSerialDuringMove(); // Add forward declaration
 void applyFlatOutput();
 void setFlatOn(bool on);
@@ -442,12 +445,22 @@ void emitStatusJSON()
 
 void saveCalibratedMaxSteps()
 {
+  if (!persistentStorageReady) {
+    return;
+  }
   EEPROM.put(EEPROM_MAGIC_ADDR, EEPROM_MAGIC);
   EEPROM.put(EEPROM_MAX_ADDR, maxSteps);
+#if defined(ARDUINO_ARCH_ESP32)
+  EEPROM.commit();
+#endif
 }
 
 void loadCalibratedMaxSteps()
 {
+  if (!persistentStorageReady) {
+    maxSteps = DEFAULT_MAX_STEPS;
+    return;
+  }
   unsigned long magic = 0;
   long savedMax = DEFAULT_MAX_STEPS;
   EEPROM.get(EEPROM_MAGIC_ADDR, magic);
@@ -459,6 +472,15 @@ void loadCalibratedMaxSteps()
     }
   }
   maxSteps = DEFAULT_MAX_STEPS;
+}
+
+void initPersistentStorage()
+{
+#if defined(ARDUINO_ARCH_ESP32)
+  persistentStorageReady = EEPROM.begin(EEPROM_STORAGE_SIZE);
+#else
+  persistentStorageReady = true;
+#endif
 }
 
 /////////////////////// Arduino Core //////////////////////////////////////////
@@ -484,14 +506,19 @@ void setup()
   flatPwm = 0;
   applyFlatOutput();
 
-  // Load persisted calibrated travel
-  loadCalibratedMaxSteps();
-
   // Serial
   Serial.begin(9600);
   while (!Serial) { /* wait for native USB boards; Uno will skip */ }
 
   Serial.println(F("\nLid Controller Ready."));
+
+  initPersistentStorage();
+  if (!persistentStorageReady) {
+    Serial.println(F("Persistent storage init failed - calibration will not persist."));
+  }
+
+  // Load persisted calibrated travel
+  loadCalibratedMaxSteps();
   
   // Initialize position based on physical limit state (not hardcoded to 0)
   lastLimitOpenActive = (digitalRead(limitOpenPin) == LOW);

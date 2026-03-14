@@ -1,6 +1,6 @@
 # Lid Controller - Hardware Wiring & Upload Notes
 
-This project uses an Arduino Nano Every or Arduino Uno-compatible board to drive a stepper via STEP/DIR and an EN pin (TMC2209 or similar).
+This project uses an Arduino Uno, Arduino Nano ESP32, or Arduino Nano Every-compatible board to drive a stepper via STEP/DIR and an EN pin (TMC2209 or similar).
 
 Wiring (pins referenced in firmware):
 
@@ -51,15 +51,24 @@ Notes
 - Use a logic-level MOSFET module that accepts `5V` PWM on its input.
 - Brightness uses Arduino `analogWrite()` (`0..255`). Default at boot is OFF.
 
+Board compatibility notes
+- Verified working in this setup: `Arduino Uno` and `Arduino Nano ESP32`.
+- `Arduino Nano Every` compiled and uploaded correctly, but in this specific lid controller setup the dedicated limit switch inputs on `D4`/`D5` were unreliable and repeatedly reported the close limit as active.
+- Because the same wiring and switch hardware worked on the Uno and Nano ESP32, the Nano Every issue appears to be board/setup-specific rather than a confirmed firmware logic bug.
+
 Uploading the firmware
 - Open `arduino_firmware_lid_led_controller_v5.ino` in the Arduino IDE (or PlatformIO).
 - Select the correct board and serial port:
 - `Arduino Nano Every` -> `arduino:megaavr:nona4809`
+- `Arduino Nano ESP32` -> `arduino:esp32:nano_nora`
 - `Arduino Uno` -> `arduino:avr:uno`
 - Compile and upload. Serial runs at `9600` baud.
 - Example `arduino-cli` commands for the Nano Every on `COM5`:
 - `arduino-cli compile --fqbn arduino:megaavr:nona4809 <sketch_folder>`
 - `arduino-cli upload -p COM5 --fqbn arduino:megaavr:nona4809 <sketch_folder>`
+- Example `arduino-cli` commands for the Nano ESP32 on `COM8`:
+- `arduino-cli compile --fqbn arduino:esp32:nano_nora <sketch_folder>`
+- `arduino-cli upload -p COM8 --fqbn arduino:esp32:nano_nora <sketch_folder>`
 
 If you want different pin assignments (buttons/limits), change the pin constants in `arduino_firmware_lid_led_controller_v5.ino` and update this README accordingly.
 
